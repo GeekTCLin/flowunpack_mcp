@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
+
+if TYPE_CHECKING:                       # 仅用于类型标注，避免与 statemachine 循环导入
+    from .statemachine import StateMachine
 
 
 def _jsonable(obj: Any) -> Any:
@@ -313,6 +316,9 @@ class AnalysisResult:
     # 字段级推断（P1，见 fields.py）：帧内字段边界与语义类型
     fields: List[FieldSpec] = field(default_factory=list)
     message_types: List[MessageType] = field(default_factory=list)
+    # 状态机推断（P2-10，见 statemachine.py）：消息序列 → 确定自动机。
+    # 只在消息能被符号化（存在可重复的命令字）时才有值，否则保持 None。
+    state_machine: Optional["StateMachine"] = None
     # 无法自证的假设（如定长帧）：永远不作为 detected 结论，只列出供人工复核
     framing_hypotheses: List[Dict[str, Any]] = field(default_factory=list)
     statistics: Dict[str, Any] = field(default_factory=dict)

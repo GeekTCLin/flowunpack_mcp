@@ -38,6 +38,9 @@ from flowunpack.io_utils import (                        # noqa: E402
 )
 from flowunpack.models import LengthFieldSpec            # noqa: E402
 from flowunpack.report import render_report              # noqa: E402
+from flowunpack.statemachine import (                    # noqa: E402
+    infer_state_machine as _infer_state_machine,
+)
 
 # ---------------------------------------------------------------------------
 # MCP SDK 兼容层：mcp>=2.0 叫 MCPServer，mcp<2.0 叫 FastMCP，接口一致。
@@ -106,6 +109,15 @@ def _slim(result_dict: Dict[str, Any], verbose: bool) -> Dict[str, Any]:
             t["lengths"] = t["lengths"][:16]
     if len(types) > 8:
         result_dict["message_types"] = types[:8]
+    sm = result_dict.get("state_machine")
+    if isinstance(sm, dict):
+        for key in ("sequence", "sequence_ascii", "state_sequence"):
+            val = sm.get(key)
+            if isinstance(val, list) and len(val) > 64:
+                sm[key] = val[:64]
+        trans = sm.get("transitions")
+        if isinstance(trans, list) and len(trans) > 64:
+            sm["transitions"] = trans[:64]
     return result_dict
 
 
@@ -191,6 +203,69 @@ def tool_analyze_bidirectional(c2s: str, s2c: str,
     out["c2s"] = _slim(out["c2s"], verbose)
     out["s2c"] = _slim(out["s2c"], verbose)
     out["ok"] = True
+    return out
+
+
+def tool_infer_state_machine(stream: str,
+                             encoding: str = "auto",
+                             k: Optional[int] = None,
+                             max_offset: Optional[int] = None,
+                             verbose: bool = False) -> Dict[str, Any]:
+    """推断一条流的协议状态机（消息序列 → 确定自动机）。
+
+    流程：先分帧（analyze_stream）→ 字段与消息类型推断 → 把每条消息**按命令字
+    符号化** → PTA + k-Tail 状态合并 → 输出状态转移表与检测到的环。
+
+    状态机是**消息序列**（时间序）的性质，不是消息集合的性质：同样的若干帧，
+    换个顺序就是另一台状态机。因此输入必须是原始流，不能是打乱后的帧列表。
+
+    只在命令字**取值会重复**时才推断（取值互不重复的字段更像递增序号或随机数，
+    没有可合并的状态）；无法符号化时 ``inferred=False`` 并给出 ``reason``，
+    不会凭空给出一台状态机。
+
+    :param k: k-Tail 的尾部深度（Nerode 等价的 k 阶近似）。省略时用配置默认值 2。
+        k 越大状态越多越精确，k 越小越激进。**单条样本无法唯一确定 k**，
+        返回里会带 ``k_sensitivity``（k=1..4 各自的状态数）供人工判断。
+    """
+    try:
+        data = coerce_bytes(stream, encoding=encoding)
+    except InputError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not data:
+        return {"ok": False, "error": "输入为空"}
+
+    cfg = _cfg_from(max_offset=max_offset)
+    result = analyze_stream(data, cfg)
+    if not result.detected:
+        return {"ok": False, "detected": False, "error": "未能确定分帧结构，"
+                "无法推断状态机", "message": result.message}
+
+    if result.state_machine is None:
+        return {"ok": True, "detected": True, "inferred": False,
+                "reason": result.statistics.get("state_machine_summary"),
+                "frames": result.unit_count,
+                "message_types": [t.describe() for t in result.message_types]}
+
+    sm = result.state_machine
+    if k is not None:
+        units = [f.header + f.body for f in result.frames]
+        recomputed = _infer_state_machine(units, result.message_types,
+                                          result.fields, cfg, k=int(k))
+        if recomputed is not None:
+            sm = recomputed
+
+    out = sm.to_dict()
+    out.update({
+        "ok": True, "detected": True, "inferred": True,
+        "frames": result.unit_count,
+        "framing": result.framing.describe() if result.framing else None,
+        "summary": sm.describe(),
+    })
+    if not verbose:
+        for key in ("sequence", "sequence_ascii", "state_sequence"):
+            val = out.get(key)
+            if isinstance(val, list) and len(val) > 64:
+                out[key] = val[:64]
     return out
 
 
@@ -292,6 +367,9 @@ def tool_service_info() -> Dict[str, Any]:
             "delim_min_lift": DEFAULT_CONFIG.delim_min_lift,
             "fixed_min_constant_ratio": DEFAULT_CONFIG.fixed_min_constant_ratio,
             "coupling_corr_threshold": DEFAULT_CONFIG.coupling_corr_threshold,
+            "sm_default_k": DEFAULT_CONFIG.sm_default_k,
+            "sm_min_symbols": DEFAULT_CONFIG.sm_min_symbols,
+            "sm_min_symbol_repeats": DEFAULT_CONFIG.sm_min_symbol_repeats,
         },
         "field_kinds": ["magic", "constant", "enum", "length", "checksum",
                         "text", "ipv4", "timestamp", "float", "counter",
@@ -408,6 +486,7 @@ def create_server(name: str = SERVER_NAME) -> Any:
         "analyze_stream": tool_analyze_stream,
         "analyze_packets": tool_analyze_packets,
         "analyze_bidirectional": tool_analyze_bidirectional,
+        "infer_state_machine": tool_infer_state_machine,
         "decode_stream": tool_decode_stream,
         "explain_spec": tool_explain_spec,
         "hexdump": tool_hexdump,

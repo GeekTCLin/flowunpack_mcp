@@ -27,6 +27,7 @@ from .io_utils import join_packets
 from .models import AnalysisResult, Frame, FramingSpec, LengthFieldSpec
 from .segmentation import apply_spec, segment_stream, walk
 from .segmentation import _score_walk
+from .statemachine import explain_skip, infer_state_machine
 
 __all__ = ["analyze_stream", "analyze_packets", "analyze", "resolve_spec"]
 
@@ -80,6 +81,17 @@ def _attach_fields(result: AnalysisResult, units: Sequence[bytes],
                 "以字段推断为准（后者是 offset+overhead 的粗糙近似）"
                 % (header_len, result.length_field.header_len))
     result.statistics["field_summary"] = summary
+
+    # ---- 状态机推断（P2-10）----
+    # 顺序上必须在消息分簇之后：状态机的「符号」就是 keyword 字段的取值。
+    # 与字段推断一样**不改变分帧结论**，失败（无法符号化 / 样本不足）时只留说明。
+    sm = infer_state_machine(units, result.message_types, fields, cfg)
+    if sm is not None:
+        result.state_machine = sm
+        result.statistics["state_machine_summary"] = sm.describe()
+    else:
+        result.statistics["state_machine_summary"] = "未推断：" + explain_skip(
+            units, result.message_types, fields, cfg)
 
 
 def _attach_structure(result: AnalysisResult, units: Sequence[bytes],

@@ -90,6 +90,8 @@ __all__ = [
     "field_boundaries", "detect_trailer_checksum",
     # 双向流联合推断（P2-8）
     "analyze_bidirectional", "BidirectionalResult", "Coupling",
+    # 状态机推断（P2-10）
+    "infer_state_machine", "StateMachine", "ktail_states",
     # 输出
     "render_report",
 ]

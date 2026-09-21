@@ -109,6 +109,42 @@ def render_report(result: AnalysisResult, frame_limit: int = 10,
                            % (t.keyword_offset, t.keyword_length,
                               "/".join(t.keyword_values)))
 
+    sm = result.state_machine
+    if sm is not None:
+        out.append("")
+        out.append("[状态机]（由消息序列推断；PTA + k-Tail 状态合并）")
+        out.append("  符号字段     : %s，%d 种取值（%s）"
+                   % (sm.symbol_source or "?",
+                      len(sm.alphabet), "/".join(sm.alphabet[:8])))
+        out.append("  规模         : %d 状态 / %d 转移（k=%d）"
+                   % (sm.states, len(sm.transitions), sm.k))
+        out.append("  初始状态     : q%d" % sm.initial)
+        out.append("  压缩率       : %.0f%%（状态数 %d / 符号数 %d，越高越有结构）"
+                   % (100 * sm.compression, sm.states, sm.symbol_count))
+        out.append("  结构强度     : %.1f%%  %s"
+                   % (100 * sm.confidence, _bar(sm.confidence)))
+        out.append("  转移表       :")
+        for t in sm.transitions[:16]:
+            out.append("      q%d --%s--> q%d   观测 %d 次"
+                       % (t["src"], t["symbol"], t["dst"], t["count"]))
+        if len(sm.transitions) > 16:
+            out.append("      ... 共 %d 条转移" % len(sm.transitions))
+        if sm.cycles:
+            for c, n in zip(sm.cycles[:4], sm.cycle_traversals[:4]):
+                out.append("  环（周期 %d，绕行 %d 次）: %s → %s"
+                           % (len(c), n, " → ".join(c), c[0]))
+        else:
+            out.append("  环           : 未发现被反复执行的环")
+        if sm.k_sensitivity:
+            out.append("  k 敏感性     : %s —— 单条样本无法唯一确定 k"
+                       % "，".join("k=%s→%d 态" % (k, v)
+                                   for k, v in sorted(sm.k_sensitivity.items())))
+        for n in sm.notes:
+            out.append("  [!] " + n)
+    elif result.statistics.get("state_machine_summary"):
+        out.append("")
+        out.append("[状态机] " + str(result.statistics["state_machine_summary"]))
+
     if result.framing_hypotheses:
         out.append("")
         out.append("[其它自洽分帧 / 低置信假设]")

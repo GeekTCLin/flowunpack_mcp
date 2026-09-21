@@ -20,7 +20,7 @@ PY="C:/Users/Xi/.workbuddy/binaries/python/envs/default/Scripts/python.exe"
 
 每次运行都 `> 输出文件 2>&1`，再用 Read 工具读该文件。
 
-## 一键回归（10 项，全部应 exit 0）
+## 一键回归（11 项，全部应 exit 0）
 
 不要用 `&&` 串联后只看尾部——分开跑并逐个记录退出码：
 
@@ -34,15 +34,16 @@ PY="C:/Users/Xi/.workbuddy/binaries/python/envs/default/Scripts/python.exe"
 "$PY" bench/diag_header_body2.py    > _hb2.txt    2>&1; echo "hb2=$?"
 "$PY" bench/diag_zero_fill.py       > _zf.txt     2>&1; echo "zf=$?"
 "$PY" bench/diag_bidir.py           > _bidir.txt  2>&1; echo "bidir=$?"
+"$PY" bench/diag_statemachine.py    > _sm.txt     2>&1; echo "sm=$?"
 "$PY" bench/check_mcp_templates.py  > _check.txt  2>&1; echo "check=$?"
 "$PY" tests/smoke_mcp_stdio.py      > _smoke.txt  2>&1; echo "smoke=$?"
 ```
 
-### 期望基线（2026-09-21 起，零填充修复之后）
+### 期望基线（2026-09-21 起，P2-10 状态机推断之后）
 
 | 检查 | 期望 |
 |---|---|
-| pytest | `210 passed, 3 skipped, 2 xfailed` |
+| pytest | `254 passed, 3 skipped, 2 xfailed` |
 | benchmark 汇总 | 正样本 33/33，模板正确 33，P/R/F1/FMS = 1.000，负样本误报 0/9 |
 | diag_fields | crc32 尾部 `checksum@-4`、typed-hdr 的 `timestamp/ipv4`、multi-type 分 3 簇 |
 | diag_templates | 4 个模板正样本 `det=True`；random512~65536 与 no-delim-text 全部 `det=False` |
@@ -50,8 +51,9 @@ PY="C:/Users/Xi/.workbuddy/binaries/python/envs/default/Scripts/python.exe"
 | diag_header_body2 | 追查一三行"正确"；追查二只有 `max_offset=64` 的两行"正确"（默认配置那行是参数不足，预期"错误"） |
 | diag_zero_fill | 一：旧判据复现 30 帧（含 10 个零载荷帧）；二：A/B 均 **10 帧且帧边界一致**；三：等价族含 `uint32_be@10`；四：四种填充全部 10 帧 |
 | diag_bidir | 用例 1~4 的耦合证据开关符合期望；用例 7 两组必须出现 `[修复]`（s2c → 10 帧） |
+| diag_statemachine | `通过 27 项，失败 0 项`；周期 2/3/4 状态数与环长相符；握手样本 4 状态且初始态只有 `00` 出边；噪声样本冲突 ≥1 且报 k 敏感性；随机命令字**无环**；三类拒绝全部命中 |
 | check_mcp_templates | 四模板 `framing.kind` 各自正确，报告含 `[分帧结构]` / `[字段推断]` |
-| smoke_mcp_stdio | `RESULT: PASS`，**8** 个工具注册（含 `analyze_bidirectional`） |
+| smoke_mcp_stdio | `RESULT: PASS`，**9** 个工具注册（含 `analyze_bidirectional`、`infer_state_machine`） |
 
 **2 项 xfail 是已知失败，不是噪声**：变长包头、BCD 长度。
 它们用 `strict=False`，一旦被修好会报 XPASS——那时应当把 `xfail` 标记删掉并
@@ -115,6 +117,21 @@ PY="C:/Users/Xi/.workbuddy/binaries/python/envs/default/Scripts/python.exe"
 个别样本反而退化，已回退。**别重复这个尝试**；等价族要断言就断言"字段覆盖了
 真实长度字节 + 帧头长度正确"，不要断言具体 offset。
 
+**改 `statemachine.py`（P2-10）**：三条判据都**不能省**，各自对应一个实测到的失败：
+
+1. **末尾短窗口按最长前缀归组**（`_tail_class`）。少了它，链尾会自成一类并让前驱
+   出现**假的非确定性**（`[1,2,3]*4`、k=2 下冲突数 0→1）。
+2. **环绕行次数门槛**（`sm_min_cycle_traversals=2`）。SCC 只能证明"存在回路"；
+   24 个随机命令字能凑出 3 状态环但只走过一遍。少了它会把巧合报成协议循环。
+3. **符号重复次数门槛**（`sm_min_symbol_repeats=2`）。递增序号/随机数给出的符号
+   互不重复，推不出结构（只会得到 n 状态链）。少了它会输出一台"看起来很成功"
+   却零信息的状态机。
+
+另外不要"修"这两件事：`k_sensitivity` 里不同 k 给出不同状态数、以及
+`compression → 0` 时仍返回一台大状态机 —— 前者是**不可判**（单条 trace 上合法的
+自动机有无穷多个），后者是**有意的**（配合低置信度与 notes 提示，比拒绝更有信息量）。
+真正该守的是"符号取不到就返回 `None` + 写明原因"。
+
 ## 清理
 
 跑完删掉临时文件（用 Python，别用 `rm`）：
@@ -123,7 +140,7 @@ PY="C:/Users/Xi/.workbuddy/binaries/python/envs/default/Scripts/python.exe"
 import os
 root = r'E:\opencode_workspace\unpacket'
 for n in ('_pytest.txt','_bench.txt','_diagf.txt','_diag.txt','_hb.txt',
-          '_check.txt','_smoke.txt','_hb2.txt','_bidir.txt','_zf.txt'):
+          '_check.txt','_smoke.txt','_hb2.txt','_bidir.txt','_zf.txt','_sm.txt'):
     p = os.path.join(root, n)
     if os.path.exists(p): os.remove(p)
 ```

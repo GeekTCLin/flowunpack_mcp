@@ -32,6 +32,8 @@
 - [15. 参考](#15-参考)
 - [16. 许可](#16-许可)
 
+各节内部的小节编号（如 §5.5 协议状态机推断、§6.2 工具列表）不在目录里单独列出。
+
 ---
 
 ## 1. 概述
@@ -42,7 +44,9 @@
 
 1. **帧在哪切断？** —— 识别分帧模板，把连续字节流切成一帧一帧；
 2. **长度字段在哪、怎么解？** —— 长度前缀协议下给出偏移、编码、端序、计数单位；
-3. **帧里面是什么？** —— 推断字段边界并标注语义类型（魔数、长度、校验和、时间戳、IPv4……）。
+3. **帧里面是什么？** —— 推断字段边界并标注语义类型（魔数、长度、校验和、时间戳、IPv4……）；
+4. **消息按什么顺序出现？** —— 把消息序列抽象成符号序列，推断协议状态机与状态环
+   （握手 → 轮询循环这类阶段结构）。
 
 ### 1.2 它不解决什么
 
@@ -50,6 +54,8 @@
 - **TLV / ASN.1 BER 嵌套结构**：需要递归嵌套推断，当前未实现。
 - **有服务端可交互的场景**：本工具是**纯离线**的，不做主动探测
   （DynPRE 那条路线依赖能与服务器交互，不适用）。
+- **状态机只有正样本**：推断出的是**过近似**自动机，能说明"观测到的序列长这样"，
+  不能判定"别的序列非法"；且单条 trace 无法唯一确定 k（见 §5.5 与 §11）。
 
 ### 1.3 典型链路
 
@@ -319,6 +325,55 @@ print(r.coupling.repaired)
 无法裁决的分歧（两侧互相都能解释）记入 `coupling.conflicts` 并再打九折，
 不做无依据的改写。
 
+### 5.5 协议状态机推断
+
+上一步得到"有哪几种消息"，这一步回答"它们按什么顺序出现"。`statemachine.py`
+把每条消息**符号化**（取命令字），整条流于是变成一个符号序列，再用
+**PTA + k-Tail 状态合并**（Biermann & Feldman 1972；Netzob 用的同一族方法）
+推断生成它的确定自动机：
+
+1. **符号化** —— 用 keyword 字段（消息类型聚类选出的那个）在每帧上的取值。
+   分簇判据不成立时（例如握手的命令字只出现一次，凑不满"每簇 ≥2 条"）自动回退到
+   包头里 cardinality 最小的枚举字段。两级都拿不到 → **不做推断并说明原因**。
+2. **PTA** —— 把符号序列展开成前缀树接受器。单条流只是一条链，这一步不含压缩。
+3. **k-Tail 合并** —— 两个位置若"后 k 步的符号串"相同则视为同一状态，这是 Nerode
+   等价关系的 k 阶近似。**末尾不足 k 个符号的位置按最长可用前缀并入已有等价类** ——
+   否则链尾会凭空多出一个状态，并让它的前驱出现**假的非确定性**（实测 3 周期序列
+   k=2 时冲突数从 0 变成 1）。
+4. **环检测** —— SCC 与"绕行次数 ≥ `sm_min_cycle_traversals`"双重门槛。绕行次数
+   取环上各转移观测次数的最小值。这道门槛不可省：24 个随机命令字能凑出一个 3 状态环，
+   但环上三条转移各只观测到 1 次（只走过一遍），那是巧合 —— 加门槛后该样本环列表清空、
+   结构强度从 0.12 降到 0.05。
+
+```python
+from flowunpack import analyze_stream, synth
+
+data, spec, cmds = synth.make_interaction_stream()   # 握手 0 + 循环 (1,2,3)×5
+r = analyze_stream(data)
+sm = r.state_machine
+print(sm.describe())
+# 4 状态 / 4 转移（k=2，符号 field@2+1 共 16 个）；检测到 1 个环，最长周期 3（最少绕行 3 次）
+print(sm.initial_transitions())
+# [{'src': 0, 'symbol': '00', 'dst': 1, 'count': 1}]     ← 握手只从初始状态出去
+print(sm.cycles, sm.cycle_traversals)
+# [['03', '01', '02']] [3]
+```
+
+**三条必须与结论一起读的边界**：
+
+- **只从正样本学习**，所有状态都是接受态，得到的是**过近似**自动机：它接受所有观测过的
+  序列，对未观测序列不做保证，**不能用来判定"某个序列非法"**。
+- **单条 trace 无法唯一确定 k**。"完整走通且确定"的自动机有无穷多个，因此结果里始终带
+  `k_sensitivity`（k=1..4 各自的状态数），而不是假装存在唯一答案。实测带单点噪声的样本
+  给出 `{1:4, 2:5, 3:6, 4:7}` —— 这个不确定性本身就是要交付的信息。
+- **压缩率是"有没有结构"的客观度量**。`compression = 1 − 状态数/符号数`；接近 0 意味着
+  状态数 ≈ 符号数，即什么都没推断出来。此时只给低置信度，并在 `notes` 里写明
+  "推断结果不具解释力"，不粉饰。
+
+无法符号化（整条流只有一种消息、样本不足、或符号取值互不重复）时 `state_machine`
+保持 `None`，原因写在 `statistics["state_machine_summary"]`：**不给结论比给错结论好**。
+诊断见 `bench/diag_statemachine.py`。
+
 ---
 
 ## 6. MCP 服务
@@ -337,6 +392,7 @@ python mcp_server.py --transport sse
 | `analyze_stream` | **主入口**：输入一条连续流（hex/base64），返回帧结构 + 分帧结果 |
 | `analyze_packets` | 逐包模式：输入多个 TCP 包的 payload（hex 数组或多行 hex） |
 | `analyze_bidirectional` | **双向联合推断**：同时输入 c2s 与 s2c 两条流，交叉验证并互相解歧义 |
+| `infer_state_machine` | **状态机推断**：把消息序列按命令字符号化，PTA + k-Tail 推断 DFA 与状态环 |
 | `decode_stream` | 用已确定的帧结构切分流，跳过检测（适合二次调用） |
 | `explain_spec` | 把帧结构翻译成人类可读说明 |
 | `hexdump` | 转储为 offset/hex/ascii，核对输入是否正确 |
@@ -428,6 +484,13 @@ result = analyze_packets([b"\x00\x05HELLO", b"\x00\x05World"])
 
 # 已知结构直接分帧，跳过检测
 out = resolve_spec(data, result.length_field)
+
+# 状态机：从消息序列推断 DFA（仅在消息可符号化时有值）
+if result.state_machine:
+    print(result.state_machine.describe())
+    print(result.state_machine.cycles)
+else:
+    print(result.statistics["state_machine_summary"])   # 为什么没推断
 ```
 
 覆写阈值：
@@ -438,12 +501,16 @@ from flowunpack.config import DEFAULT_CONFIG
 
 cfg = DEFAULT_CONFIG.overridden(max_offset=64, max_overhead=128, scan_start_offsets=True)
 analyze_stream(data, cfg)
+
+# 状态机相关：k-Tail 深度、最小符号数、符号重复次数门槛
+sm_cfg = DEFAULT_CONFIG.overridden(sm_default_k=3, sm_min_symbols=16)
 ```
 
 主要导出：`analyze_stream` / `analyze_packets` / `resolve_spec` /
 `segment_stream` / `apply_spec` / `walk` / `analyze` /
 `detect_delimited` / `detect_ascii_length` / `detect_fixed_length` / `choose_framing` /
-`infer_fields` / `infer_message_types` / `render_report`。
+`infer_fields` / `infer_message_types` / `analyze_bidirectional` /
+`infer_state_machine` / `ktail_states` / `render_report`。
 
 ---
 
@@ -591,6 +658,23 @@ python bench/benchmark.py
   响应用分隔符"这类异构协议，耦合证据全部不成立，工具会明确提示（这是正确行为，
   不是缺陷）。
 
+**状态机推断的边界**（方法论层面，不是待修的缺陷）
+
+- **只从正样本学习 → 得到过近似自动机**。所有状态都是接受态，它接受所有观测过的
+  序列，对未观测序列不做保证，**不能用来判定"某个序列非法"**（拒绝负样本需要负样本
+  或主动学习，不在当前范围）。
+- **单条 trace 无法唯一确定 k，也无法唯一确定状态机**。任何"完整走通且确定"的自动机
+  都是合法假设，因此结果始终携带 `k_sensitivity`（k=1..4 各自的状态数）。看到
+  "k=1 给 4 态、k=4 给 7 态"不是 bug，是这个问题的固有不确定性。
+- **符号不可得时拒绝，不硬造**：整条流只有一种消息、消息数 < `sm_min_symbols`（12）、
+  或符号平均重复次数 < `sm_min_symbol_repeats`（2.0，过滤递增序号/随机数）时，
+  `state_machine` 保持 `None` 并在 `statistics["state_machine_summary"]` 写明原因。
+- **"环"必带绕行次数门槛**。SCC 只能说明"存在回路"，加上"环上各转移至少观测到
+  `sm_min_cycle_traversals`（2）次"才等于"被反复执行的结构"。少于这个门槛的环是
+  巧合 —— 实测 24 个随机命令字能凑出 3 状态环但只走过一遍，加门槛后被正确剔除。
+- **状态数 ≈ 符号数时不要读结论**。`compression` 接近 0 意味着没有可合并状态，
+  推断结果不具解释力；`notes` 会直接这么写。
+
 **性能**
 
 - 长度前缀：核心子空间短路命中时约 1/7 的假设枚举量；未命中则补搜剩余子空间，
@@ -614,6 +698,7 @@ src/
 │   ├── detectors.py         分隔符 / ASCII 长度 / 定长 三个模板探测器 + 集成裁决
 │   ├── fields.py            字段级推断：边界 + 语义类型 + 消息类型聚类
 │   ├── bidir.py             双向流联合推断：三条耦合证据 + 跨方向迁移裁决
+│   ├── statemachine.py      状态机推断：符号化 + PTA + k-Tail 合并 + 环检测
 │   ├── analyzers/
 │   │   ├── length_field.py  逐包模式长度字段检测与评分
 │   │   └── structure.py     固定字节 / 魔数 / 熵值 / 包头模板
@@ -634,6 +719,7 @@ src/
 │   ├── diag_header_body.py  包头/包体布局的支持边界与三类失败模式
 │   ├── diag_zero_fill.py    零填充伪解的成因拆解（帧长/帧头关系、等价族、修复前后）
 │   ├── diag_bidir.py        双向耦合三条证据开关 + 冲突裁决诊断
+│   ├── diag_statemachine.py 状态机推断：周期/握手/噪声/拒绝/环绕行门槛诊断
 │   ├── profile_search.py    搜索耗时构成剖析
 │   ├── profile_p2.py        P2 性能剖析
 │   └── check_mcp_templates.py  MCP 工具层 + 报告渲染的模板与字段覆盖校验
@@ -666,7 +752,7 @@ python bench/calibrate.py              # 置换统计量在正负样本上的标
 
 已完成：P0-1（帧长公式推广为 `a·v + b`）、P0-2（多模板探测器集成）、
 P0-3（金标准基准）、P1（字段级语义标注 + 消息类型聚类）、
-**P2-9（分阶段搜索）**、**P2-8（双向流联合推断）**。
+**P2-9（分阶段搜索）**、**P2-8（双向流联合推断）**、**P2-10（状态机推断）**。
 
 **P2 —— 能力拓展**（`docs/ALGORITHM_ROADMAP.md` 第 8~10 项）：
 
@@ -674,7 +760,7 @@ P0-3（金标准基准）、P1（字段级语义标注 + 消息类型聚类）�
 |---|---|---|
 | 8 | **双向流联合推断**（remote coupling） | ✅ 已完成。`bidir.py` + `analyze_bidirectional` 工具；三条可验证的耦合证据（结构可迁移 / 类型双射 / 字段身份一致 / 长度相关），能**纠正在单方向上被伪解锁定的结论**，也能识别出两条无关的流。见 §5.4。 |
 | 9 | **性能优化** | ✅ 已完成。`_search` 拆成"枚举 + 排序"，核心子空间证据足够强时短路（`matched_gap ≥ 0.25`），否则只补搜剩余子空间（不重复枚举，最坏情况与全量同价）。varint 3.98s→1.17s、random-8192 4.51s→0.62s；全套测试 55.6s→10.5s。 |
-| 10 | **状态机推断** | ⏳ 待做。在消息类型聚类之后，按消息序列推断协议状态机。参考 Netzob 的 PTA / 主状态机推断。 |
+| 10 | **状态机推断** | ✅ 已完成。`statemachine.py` + `infer_state_machine` 工具：消息符号化（keyword → 枚举字段回退）→ PTA → **k-Tail 状态合并**（末尾短窗口按最长前缀归组，否则产生假非确定性）→ SCC + 绕行次数门槛的环检测。暴露 `k_sensitivity` 与 `compression`，符号不可得时**拒绝而非硬造**。见 §5.5。 |
 
 另有两项延后：评分改为因子图后验概率（需先有标注数据集）、
 真实 pcap 语料上的 FPR 评测（需先有语料）。
@@ -694,8 +780,9 @@ P0-3（金标准基准）、P1（字段级语义标注 + 消息类型聚类）�
 
 | 项目 | 适用点 |
 |---|---|
-| [Netzob](https://github.com/netzob/netzob) | 最完整的 PRE 框架：MSA 推断、分隔符、关键字聚类、状态机 |
-| [NetPlier](https://github.com/netplier-tool/NetPlier) | 多序列比对 + 概率因子图推断 keyword（NDSS'21） |
+| [Netzob](https://github.com/netzob/netzob) | 最完整的 PRE 框架：MSA 推断、分隔符、关键字聚类、状态机（PTA / 状态融合） |
+| Biermann & Feldman, *On SYNTHESIS of finite-state machines from samples of their behavior* (IEEE TC, 1972) | k-Tail 状态合并的原始方法 —— 本项目 `statemachine.py` 的算法基础 |
+| [NetPlier](https://github.com/netplier-tool/NetPlier) | 多序列比对 + 概率因子图推断 keyword（NDSS'21）；双向 remote coupling 的思路来源 |
 | [nemesys](https://github.com/vs-uulm/nemesys) | 单消息内在结构、bit 级边界、FMS 指标、PCA 细化边界 |
 | [fieldhunter](https://github.com/vs-uulm/fieldhunter) | 语义类型推断（长度/校验和/主机名/命令字） |
 | BinaryInferno (NDSS'23) | 探测器集成 + 熵变边界检测 + 序列化模式搜索 |

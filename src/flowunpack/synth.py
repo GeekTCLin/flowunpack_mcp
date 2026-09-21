@@ -25,6 +25,7 @@ __all__ = [
     "make_crc_length_stream",
     "make_typed_fields_stream",
     "make_multi_type_stream",
+    "make_interaction_stream",
     "make_header_body_stream",
     "make_header_varint_stream",
     "make_deep_length_stream",
@@ -332,6 +333,40 @@ def make_multi_type_stream(*, rounds: int = 5, seed: int = 23
                            semantics="body_length", header_len=4, body_offset=4,
                            endian="big")
     return bytes(out), spec
+
+
+def make_interaction_stream(*, rounds: int = 5, handshake: int = 0x00,
+                            cycle: Tuple[int, ...] = (0x01, 0x02, 0x03),
+                            seed: int = 41, min_body: int = 8,
+                            max_body: int = 24, magic: bytes = b"\xab\xcd"
+                            ) -> Tuple[bytes, LengthFieldSpec, Tuple[int, ...]]:
+    """带握手前缀的**周期交互**流：``[magic(2)][cmd(1)][len(1)][body]``。
+
+    命令字序列 = ``(handshake,) + cycle * rounds``：握手只出现一次，之后是稳定的
+    请求-应答循环。这是真实协议最常见的形态（登录 → 轮询 / 心跳 / 会话保活），
+    也是状态机推断最有意义的场景 —— 正确答案是"握手把状态带到循环入口，
+    之后按 ``len(cycle)`` 为周期循环"，适合验证推断出的环长与状态数。
+
+    命令字**取值会重复**（这是能充当状态机符号的前提）。``handshake`` 只出现一次，
+    会被 ``infer_message_types`` 的"每簇至少 cluster_min_group 条"判据挡下，于是
+    符号化走 :func:`flowunpack.statemachine` 的**枚举字段回退**路径 —— 这正好把
+    回退路径也纳入回归覆盖。
+
+    :return: ``(流字节, 期望帧结构, 命令字序列)``。命令字序列可用于断言推断出的
+        状态数与环长度（期望 ``1 + len(cycle)`` 个状态、周期 ``len(cycle)``）。
+    """
+    rng = random.Random(seed)
+    cmds: Tuple[int, ...] = (handshake,) + tuple(cycle) * rounds
+    out = bytearray()
+    span = max(1, max_body - min_body + 1)
+    for c in cmds:
+        n = min_body + rng.randrange(span)
+        body = bytes(rng.randrange(256) for _ in range(n))
+        out += magic + bytes([c]) + bytes([n & 0xFF]) + body
+    spec = LengthFieldSpec(offset=3, format="uint8", width=1, overhead=4,
+                           semantics="body_length", header_len=4, body_offset=4,
+                           endian="big")
+    return bytes(out), spec, cmds
 
 
 def make_header_body_stream(*, header_len: int = 16, len_offset: int = 12,
