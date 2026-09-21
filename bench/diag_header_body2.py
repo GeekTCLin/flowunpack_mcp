@@ -55,7 +55,9 @@ def main() -> int:
         lf = res.length_field
         got = (f"offset={lf.offset} {lf.format} overhead={lf.overhead}"
                if lf else "None")
-        ok = bool(lf and lf.offset == 12 and lf.overhead == 16)
+        # 判据看帧头长度与帧数，不看 offset：零填充让长度字段的高位字节变成
+        # 常量，offset/width 落入等价族（见 README §11）。
+        ok = bool(lf and lf.overhead == 16 and res.unit_count == 10)
         print(f"  {'正确' if ok else '错误'}  {label:<12} -> {got}"
               f"  frames={res.unit_count} conf={res.confidence:.2f}")
 
@@ -82,7 +84,9 @@ def main() -> int:
         lf = res.length_field
         got = (f"offset={lf.offset} {lf.format} overhead={lf.overhead}"
                if lf else "None")
-        ok = bool(lf and lf.offset == 40 and lf.overhead == 48)
+        # 真值是 offset=40 / overhead=48；同族等价编码（如 uint32_le@41）也算对，
+        # 因此判据只看"是否切出真实的 10 帧"。
+        ok = bool(lf and res.unit_count == 10)
         print(f"  {'正确' if ok else '错误'}  {label:<32} -> {got}"
               f"  frames={res.unit_count}")
 

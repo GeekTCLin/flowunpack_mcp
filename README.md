@@ -8,7 +8,7 @@
 | 许可 | MIT |
 | 依赖 | 核心库**零第三方依赖**；Python ≥ 3.9（实测 3.13） |
 | 可选依赖 | `mcp`（MCP 服务）、`scapy`（读本地 pcap） |
-| 测试 | 165 项 pytest 用例（含 3 项标记 xfail 的已知失败） |
+| 测试 | 210 项 pytest 用例通过（另 2 项 xfail 标记已知失败） |
 | 文档 | 算法路线与论文/开源参考见 [`docs/ALGORITHM_ROADMAP.md`](docs/ALGORITHM_ROADMAP.md) |
 
 ---
@@ -206,6 +206,10 @@ frame_len = scale * value + overhead      （变长编码时再 + 字段自身�
 > 长度字段偏移超过 32 时需手动放宽：`max_offset=64`。实测一个 48 字节包头、
 > 长度字段在 offset 40 的协议，放宽后能正确切出 10 帧（可能以同族的等价编码给出，
 > 如 `uint32_le@41`，但**帧边界完全一致**）。
+>
+> 上表第 3 行的 `rsv1×9` 若填 `0x00`（真实协议的常态），帧边界与帧头长度仍然正确，
+> 但长度字段的 `(offset, width)` 会落入**等价族**（实测报 `uint32_be@10`）——
+> 这是信息论歧义，不是缺陷。见 §11。
 
 #### 为什么"走完且无剩余"不够
 
@@ -484,10 +488,11 @@ python bench/benchmark.py
 > 字节级 FPR 的第三方佐证参见 BinaryInferno 论文：当前 SOTA 的
 > Precision 天花板约 0.69、FPR 约 0.04（见 [§15 参考](#15-参考)）。
 >
-> **不在基准里的失败**：基准只收"应当成功"的用例。三个已知失败模式以
+> **不在基准里的失败**：基准只收"应当成功"的用例。两个已知失败模式以
 > `pytest.mark.xfail` 固定在 `tests/test_detection.py::TestHeaderBodyLayout`
-> 里（`test_zero_filled_header` / `test_variable_header_should_be_rejected` /
+> 里（`test_variable_header_should_be_rejected` /
 > `test_bcd_length_should_be_rejected`），修好后会自动报 XPASS。
+> （**包头零填充**曾在此列，2026-09 已修复并转成正向断言 `test_zero_filled_header`。）
 
 ---
 
@@ -548,10 +553,24 @@ python bench/benchmark.py
 - 样本需 ≥ 4 帧（`min_frames`），否则无法排除巧合。
 - **低熵载荷（HTTP/SMTP/SIP 等文本 body）是最难的情形**：任意偏移读出的字节都落在窄区间，
   会产生大量"必然伪解"。当前靠帧数评分、紧致拟合与置换检验缓解，但未根治。
-- **包头里的零填充保留字段同样危险，且比低熵载荷更常见**。实测：一个 16 字节包头、
-  长度字段在 offset 12 的协议，包头中间 9 字节填 `0x00` 时给出 30 帧的伪解且置信度
-  高达 0.83；同样的布局填 `0xAA` 则完全正确（见 `bench/diag_header_body.py`）。
-  **遇到"包头定长但被判出异常多的帧"时，先怀疑包头里的常量/零填充区。**
+- **包头里的零填充保留字段是最常见也最难的形态**（真实协议的保留字段几乎都填 0）。
+  零区让"任意偏移读出的长度值"都落在极窄区间，制造出大量等价假设。实测：一个 16
+  字节包头、长度字段在 offset 12 的协议，包头中间 9 字节填 `0x00` 时曾被判成
+  `offset=2 uint16_le overhead=5` 的 **30 帧伪解**（置信度 0.83），而真解（10 帧）
+  **根本不在候选列表里**。根因是走查只要求帧容纳"长度字段 + 1 字节"，长度值为 0 时
+  帧长退化成帧头长度，一条"帧长 = 帧头长"的假链恰好把流等分成 30 段。现在走查要求
+  帧必须容纳**整个帧头**再加 1 字节载荷（等价于长度值不得为 0），超量伪解全部消失。
+  诊断见 `bench/diag_zero_fill.py`。
+  **遇到"包头定长但被判出异常多的帧"时，先怀疑包头里的常量/零填充区** —— 这条经验
+  对任何长度前缀检测器都适用。
+- **零填充下"长度字段的宽度"是不可判的**（信息论层面，非缺陷）：帧边界（10 帧）与
+  帧头长度（`overhead=16`）都已正确，但字段的 `(offset, width)` 落入**等价族** ——
+  零填充让 b12/b14/b15 恒为 0，`uint8@13` / `uint16_be@12` / `uint32_be@10` 读出
+  同一数值、给出同一套帧边界，任何判据都只能在其中挑一个。实测报 `uint32_be@10`
+  （比真值多覆盖两个恒零字节）。复核时看"字段是否覆盖了真正的长度字节"即可，
+  不必纠结宽度。曾尝试把"字段覆盖的恒定字节数"提到 `_dedup_key` 的宽度之前来修
+  这一点，结果 20 项既有断言从 `uint16_be@N` 翻成 `uint8@N+1`、个别样本反而退化
+  —— 收益不抵风险，已回退（见 `segmentation._dedup_key` 的说明）。
 - **包头里含逐帧随机字段（序列号、会话 ID、随机数）时结论不稳定**：真解通常仍在
   候选列表里，但可能排在伪解之后；跑法不同的数据可能翻车。
 - **变长包头（包头长度随命令字变化）在模型上就无解** —— `frame_len = a·v + b` 里的
@@ -603,7 +622,7 @@ src/
 │   ├── pcap.py              可选：读 pcap（惰性 import scapy）
 │   └── synth.py             合成测试数据（可指定高熵/低熵载荷、四种模板）
 ├── flowunpack_mcp/          MCP 服务实现
-├── tests/                   pytest 用例（208 项，其中 3 项 xfail 标记已知失败）
+├── tests/                   pytest 用例（210 项通过，另 2 项 xfail 标记已知失败）
 ├── bench/                   评估与剖析脚本
 │   ├── benchmark.py         金标准帧边界 → P/R/F1/FMS/FPR（覆盖四种模板）
 │   ├── calibrate.py         正负样本上的置换统计量标定
@@ -613,6 +632,7 @@ src/
 │   ├── diag_templates.py    四种模板的集成裁决行为诊断
 │   ├── diag_fields.py       字段边界 / 语义类型 / 消息分簇的诊断
 │   ├── diag_header_body.py  包头/包体布局的支持边界与三类失败模式
+│   ├── diag_zero_fill.py    零填充伪解的成因拆解（帧长/帧头关系、等价族、修复前后）
 │   ├── diag_bidir.py        双向耦合三条证据开关 + 冲突裁决诊断
 │   ├── profile_search.py    搜索耗时构成剖析
 │   ├── profile_p2.py        P2 性能剖析
@@ -629,7 +649,7 @@ legacy/                      旧脚本（已归档，不参与构建，仅作参
 ## 13. 开发与测试
 
 ```bash
-python -m pytest tests -q              # 208 项（3 项 xfail = 已知失败，见 README §11）
+python -m pytest tests -q              # 209 项（2 项 xfail = 已知失败，见 README §11）
 python -m pytest tests -q -rxX         # 打印 xfail 原因
 python tests/smoke_mcp_stdio.py        # 真实启动 MCP 进程做端到端验证
 python bench/benchmark.py              # 分帧准确率基准（四模板 P/R/F1/FMS + 误报率）
@@ -659,11 +679,14 @@ P0-3（金标准基准）、P1（字段级语义标注 + 消息类型聚类）�
 另有两项延后：评分改为因子图后验概率（需先有标注数据集）、
 真实 pcap 语料上的 FPR 评测（需先有语料）。
 
-还有一项**已知缺陷**未修（优先级高于 P2-10）：包头里的全零保留字段会让长度前缀
-检测产生远多于真解的伪解（30 个伪帧 vs 10 个真帧，见 §11 与
-`tests/test_detection.py::TestHeaderBodyLayout::test_zero_filled_header`）。
-信号是清楚的（伪帧数 ≫ 真帧数 + 包头存在长常量区间），但需要一条新的判据，
-不宜仓促处理。
+包头零填充导致的超量伪解（30 伪帧 vs 10 真帧）已于 2026-09-21 修复。根因是走查
+缺少"帧长必须容纳整个帧头"这条必要条件 —— 在 `frame_len = scale*value + overhead`
+里，长度值为 0 时帧长退化成帧头长度。修复见 `segmentation.walk`；回归用例
+`tests/test_detection.py::TestHeaderBodyLayout::test_zero_filled_header` 与
+`test_frame_must_hold_whole_header`；诊断见 `bench/diag_zero_fill.py`。
+
+残留一项**信息论层面的歧义**（非缺陷）：零填充让长度字段的高/低位字节变成常量，
+`(offset, width)` 不可判（实测报 `uint32_be@10`）。见 §11。
 
 ---
 

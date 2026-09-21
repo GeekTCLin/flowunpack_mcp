@@ -136,9 +136,22 @@ def walk(data: bytes, offset: int, fmt: str, overhead: int, cfg: AnalysisConfig,
             truncated = True
             break
         value, width = got
-        frame_len = scale * value + overhead + (width if count_width else 0)
-        # 帧至少要能容纳长度字段自身 + 1 字节载荷
-        if frame_len <= 0 or frame_len < offset + width + 1:
+        extra = width if count_width else 0
+        frame_len = scale * value + overhead + extra
+        # 帧必须容纳**整个帧头**（``overhead + extra``，即长度字段之外的固定
+        # 前缀 + 长度字段自身）再加至少 1 字节载荷；同时不能短于"长度字段
+        # 结束位置"（``offset`` 可以大于 ``overhead``，此时帧头被拉长）。
+        #
+        # 为什么必须按整个帧头算：当 ``overhead > 0`` 且长度字段埋在帧头中间
+        # （``offset + width < overhead``）时，旧判据 ``frame_len >= offset+width+1``
+        # 允许 ``frame_len == overhead + extra`` 的病态帧 —— 它等价于
+        # ``scale*value == 0``，即"长度字段声明了 0 字节载荷"，帧长恰好退化成
+        # 帧头长度。真实协议不会这么设计，但**包头零填充**时极易撞上：零区
+        # 里任意偏移读出的值都是 0，于是一条"帧长 = 帧头长"的假链能把整条流
+        # 等分成异常多的段（实测 10 真帧 → 30 伪帧，见 README §11）。
+        #
+        # 新判据等价于 ``scale*value >= 1``：长度值不得为 0。
+        if frame_len <= 0 or frame_len <= max(overhead + extra, offset + width):
             break
         if pos + frame_len > total:
             truncated = True
@@ -428,6 +441,18 @@ def _score_walk(data: bytes, res: WalkResult, cfg: AnalysisConfig,
 
 def _dedup_key(res: WalkResult) -> tuple:
     """同一族假设的优选次序：紧致拟合 > 字段更宽 > 单位更简单 > 偏移更小。
+
+    **"字段更宽"在这里是有意保留的偏好**：同一套帧边界往往能被一个窄字段
+    （``uint8``）和一个宽字段（``uint16_be``）同时解释 —— 前者读到的值恰好
+    等于后者的低字节，差别只是"高位字节恒为常量"。真实协议里"长度字段宽
+    2 字节、但取值一直小于 256"极其常见，因此默认报告更宽的字段，避免把
+    ``uint16`` 误报成 ``uint8``（与 :func:`_truncated_field` 的取向一致）。
+
+    零填充包头会把这条偏好推得过远：填充区里任意偏移读出的都是 ``0x00``，
+    于是 ``uint32_be@10`` 这种"多读 3 个零字节"的等价编码会胜出。实测过
+    把"字段覆盖的恒定字节数"提到 width 之前，结果 20 项既有断言从
+    ``uint16_be@N`` 翻成 ``uint8@N+1``，且个别样本退化 —— 收益不抵风险，
+    故不采用。详见 README §11「零填充包头的等价编码」。
 
     ``-res.scale`` 让 scale=1（以字节计）优先于 scale=4：同一套帧边界能用
     更简单的计数单位解释时，选简单的那个（Occam）。

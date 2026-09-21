@@ -152,8 +152,10 @@ def make_scaled_length_stream(scale: int = 4, fmt: str = "uint16_be", *,
 
     两个设计取舍，都是为了不让"scale 支持度"这一个变量被其它难点掩盖：
 
-    * 对齐填充用**随机字节**而非零字节。零填充是极强的结构伪影（会造出"某偏移
-      恒为 0"的假特征），真实协议里帧尾填充通常是内容无意义的字节。
+    * 对齐填充用**随机字节**而非零字节。零填充会造出"某偏移恒为 0"的假结构
+      特征，让"scale 支持度"这个变量被它的副作用掩盖（详见
+      :func:`make_zero_filled_header_stream`）；真实协议里帧尾填充通常是
+      内容无意义的字节。
     * 默认载荷用高熵 ``"bytes"``。若用低熵 ASCII，伪解问题会先于 scale 问题暴露，
       导致无法归因；低熵场景由 ``payload="ascii"`` 单独覆盖。
     """
@@ -347,9 +349,12 @@ def make_header_body_stream(*, header_len: int = 16, len_offset: int = 12,
     :param filler: 包头除长度字段外的填充，对检测难度**有决定性影响**：
 
         * ``"const"`` —— 常量字节 ``0xAA``。包头跨帧恒定，是最容易的情形；
-        * ``"zeros"`` —— 零字节。**真实协议的保留字段几乎都填 0，但这会致命**：
-          零区让"任意偏移读出的值都很小"，从而产生大量伪解。实测同一布局下
-          填 0 会给出 30 帧伪解且置信度 0.83，填 0xAA 则完全正确；
+        * ``"zeros"`` —— 零字节。**真实协议的保留字段几乎都填 0，这是最难也
+          最常见的形态**：零区让"任意偏移读出的长度值"都落在极窄区间，制造出
+          大量等价假设与伪解。实测同一布局下填 ``0xAA`` 报 ``uint16_be@12``、
+          填 ``0x00`` 报 ``uint32_be@10`` —— 帧边界与帧头长度都对，但后者的
+          字段解释更宽（多覆盖了两个恒零字节）。详见
+          :func:`make_zero_filled_header_stream`；
         * ``"random"`` —— 逐帧随机（模拟序列号 / 会话 ID / 随机数）。真解通常
           仍在候选里但排在伪解之后，结论不稳定。
     :param trailer: 尾部字节数（>0 时填充 CRC32）。``overhead`` 会把尾部算进去。
@@ -447,8 +452,19 @@ def make_deep_length_stream(**kw) -> Tuple[bytes, LengthFieldSpec]:
 def make_zero_filled_header_stream(**kw) -> Tuple[bytes, LengthFieldSpec]:
     """同 :func:`make_deep_length_stream`，但包头填充 0x00。
 
-    **已知会导致误判**（给出远多于真实帧数的伪解且置信度偏高）。保留在此是为了
-    把这个失败模式固定成回归用例，而不是让它在文档里慢慢腐烂。
+    零填充是整条流水线**最难也最常见的输入形态**：保留字段填 0 是真实协议的
+    常态，而零区让"任意偏移读出的长度值"都落在极窄区间，制造出大量等价假设
+    与伪解。曾经这里会产出一条 30 帧的伪解，真解（10 帧）根本不在候选列表里。
+
+    **根因**：``walk`` 当时只要求帧容纳"长度字段 + 1 字节"，长度值为 0 时帧长
+    退化成帧头长度，于是一条"帧长 = 帧头长"的假链恰好把整条流等分成 30 段。
+    现在 ``walk`` 要求帧容纳**整个帧头**再加 1 字节载荷（等价于长度值不得为 0），
+    超量伪解全部消失。
+
+    **当前残留**：帧边界（10 帧）与帧头长度（``overhead=16``）均已正确，但长度
+    字段的 ``(offset, width)`` 仍属**等价族** —— 零填充让 b12/b14/b15 恒为 0，
+    ``uint8@13`` / ``uint16_be@12`` / ``uint32_be@10`` 读出同一数值、给出同一套
+    帧边界，信息上无法区分，实测报 ``uint32_be@10``。见 README §11。
     """
     kw.setdefault("header_len", 16)
     kw.setdefault("len_offset", 12)
@@ -544,9 +560,10 @@ def make_request_response_pair(
       于是请求类型序列与响应类型序列构成稳定双射。
     * **长度相关** —— 响应体长 = 请求体长 × ``length_factor`` + ``length_bias``。
 
-    :param filler: 包头里除命令字与长度字段外的填充字节。**别填 0**：零填充
-        保留字段会让长度前缀检测产生远多于真解的伪解（见
-        :func:`make_zero_filled_header_stream`）。
+    :param filler: 包头里除命令字与长度字段外的填充字节。默认 ``0x5A``。填 0
+        会让长度字段的 ``(offset, width)`` 落入等价族（见
+        :func:`make_zero_filled_header_stream`），无谓地干扰对"耦合证据"的
+        验证，故默认避开。
     :return: ``(c2s, s2c, c2s 的期望 spec, s2c 的期望 spec)``
     """
     if not cmd_cycle:
@@ -628,9 +645,9 @@ def make_constant_length_pair(*, pairs: int = 10, fmt: str = "uint16_be",
     s2c = bytearray()
 
     def _frame(hlen: int, cmd: int, body_len: int) -> bytes:
-        # 包头填充用**非零**常量：全零保留字段会让长度前缀检测产生远多于真解
-        # 的伪解（见 make_zero_filled_header_stream），那是另一类已知缺陷，
-        # 不应混进本样本里干扰对"裁决"能力的验证。
+        # 包头填充用**非零**常量：全零保留字段会让长度字段的解释落入等价族
+        # （见 make_zero_filled_header_stream），那是另一类歧义，不应混进
+        # 本样本里干扰对"裁决"能力的验证。
         h = bytearray([filler] * hlen)
         h[cmd_offset] = cmd & 0xFF
         h[len_offset:len_offset + width] = _uint(body_len, fmt)

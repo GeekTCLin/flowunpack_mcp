@@ -62,7 +62,14 @@ def case_len_at_head() -> Tuple[bytes, dict]:
 
 
 def case_deep_offset() -> Tuple[bytes, dict]:
-    """长度字段靠后：offset=12，包头 16B。"""
+    """长度字段靠后：offset=12，包头 16B。
+
+    包头中间 9 字节是 ``0x00``（真实协议保留字段的常态）。帧边界与帧头长度都
+    能正确给出（10 帧 / ``overhead=16``），但长度字段的 ``(offset, width)``
+    落入**等价族** —— 零填充让高位字节恒为 0，``uint16_be@12`` / ``uint8@13``
+    / ``uint32_be@10`` 读出同一数值、给出同一套帧边界。因此本用例只校验
+    ``overhead`` 与帧数（``equiv`` 开关），见 README §11。
+    """
     out = bytearray()
     for i in range(10):
         body = payload(rng.randint(8, 40))
@@ -73,7 +80,8 @@ def case_deep_offset() -> Tuple[bytes, dict]:
         head[14:16] = i.to_bytes(2, "big")
         out += bytes(head) + body
     return bytes(out), {"offset": 12, "format": "uint16_be", "scale": 1,
-                        "overhead": 16, "note": "包头 16B 定长，len 在 offset 12"}
+                        "overhead": 16, "equiv": True, "frames": 10,
+                        "note": "包头 16B 定长，len 在 offset 12（零填充 → 等价族）"}
 
 
 def case_total_length() -> Tuple[bytes, dict]:
@@ -116,9 +124,10 @@ def case_varint_len() -> Tuple[bytes, dict]:
     for i in range(12):
         body = payload(rng.randint(8, 200))
         out += b"PK" + bytes([0x01]) + enc(len(body)) + b"\x00" + body
-    # 包头 = 2(magic) + 1(cmd) + varint(w) + 1(rsv) = 4 + w - 1
+    # 包头 = 2(magic) + 1(cmd) + varint(w) + 1(rsv)；count_width=True 时
+    # frame_len = value + overhead + w，故 overhead = 4（除长度字段外的固定前缀）。
     return bytes(out), {"offset": 3, "format": "varint", "scale": 1,
-                        "overhead": 3, "variable_overhead": True,
+                        "overhead": 4, "variable_overhead": True,
                         "note": "varint 长度字段 → 公式再加字段实际宽度"}
 
 
@@ -211,12 +220,21 @@ def main() -> int:
         else:
             g = (f"offset={got.offset} {got.format} scale={got.scale} "
                  f"overhead={got.overhead} var={got.variable_overhead}")
-            ok = (exp["offset"] is not None
-                  and got.offset == exp["offset"]
-                  and got.format == exp["format"]
-                  and got.scale == exp["scale"]
-                  and (exp["overhead"] is None or got.overhead == exp["overhead"]))
+            if exp.get("equiv"):
+                # 允许同族等价编码：只校验帧头长度与帧数（见 case_deep_offset）
+                ok = (got.overhead == exp["overhead"]
+                      and res.unit_count == exp["frames"])
+            else:
+                ok = (exp["offset"] is not None
+                      and got.offset == exp["offset"]
+                      and got.format == exp["format"]
+                      and got.scale == exp["scale"]
+                      and (exp["overhead"] is None
+                           or got.overhead == exp["overhead"]))
             detail = f"frames={res.unit_count} conf={res.confidence:.2f}"
+            if exp.get("equiv"):
+                detail += f" （等价族：期望 offset={exp['offset']}，"
+                detail += "同族写法均可）"
         mark = "支持" if ok else ("不支持" if exp["offset"] is None
                                   else "**不符**")
         print(f"\n[{mark}] {name}")

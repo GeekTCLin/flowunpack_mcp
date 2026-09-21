@@ -418,16 +418,53 @@ class TestHeaderBodyLayout:
 
     # ---- 已知失败：用 xfail 固定住，避免这条边界在文档里腐烂 ----
 
-    @pytest.mark.xfail(strict=False, reason=(
-        "包头零填充（保留字段填 0）会产生远多于真解的伪解，且置信度偏高。"
-        "实测同布局填 0xAA 完全正确、填 0x00 给出 30 帧伪解 conf=0.83。"
-        "见 README §11。"))
     def test_zero_filled_header(self):
+        """包头零填充（保留字段填 0）—— 曾经的 30 帧伪解，已修复。
+
+        修复前的实测：真解（10 帧）**根本不在候选列表里**，胜出的是一条
+        ``offset=2 uint16_le overhead=5`` 的 30 帧伪解（conf 0.83）。根因是
+        :func:`walk` 只要求帧容纳"长度字段 + 1 字节"，长度值为 0 时帧长退化成
+        帧头长度，于是一条"帧长 = 帧头长"的假链恰好把整条流等分成 30 段。
+        ``walk`` 现在要求帧容纳**整个帧头**再加 1 字节载荷（等价于长度值不得
+        为 0），30 帧伪解全部消失。
+
+        长度字段的具体 ``(offset, width)`` 仍属**等价族**：零填充让 b12/b14/b15
+        恒为 0，``uint8@13`` / ``uint16_be@12`` / ``uint32_be@10`` 读出同一个
+        数值、给出同一套帧边界，信息上无法区分（README §11）。因此这里只断言
+        "字段确实覆盖了真实长度字节 b13"。
+        """
         data, spec = make_zero_filled_header_stream()
+        gold = [f.offset for f in apply_spec(data, spec, DEFAULT_CONFIG)[0]]
+
         res = analyze_stream(data)
         assert res.detected
-        assert (res.length_field.offset, res.length_field.overhead) == (12, 16)
-        assert res.unit_count == 10
+        assert res.framing.kind == "length_prefixed"
+        assert res.unit_count == 10                    # 修复前是 30
+        assert [f.offset for f in res.frames] == gold
+        assert res.stream_trailing == 0
+        assert res.length_field.overhead == 16         # 帧头长度必须正确
+
+        lf = res.length_field
+        width = lf.width or 1
+        assert lf.offset <= 13 < lf.offset + width     # 必须读到真实长度字节
+
+    def test_frame_must_hold_whole_header(self):
+        """结构性必要条件：帧长必须容纳整个帧头 + 1 字节载荷。
+
+        等价于"长度值不得为 0"。修复前 ``walk`` 只检查
+        ``frame_len >= offset + width + 1``；当长度字段埋在帧头中间
+        （``offset + width < overhead``）时，``frame_len == overhead`` 的
+        "零载荷帧"被放行 —— 一条全零字节流会被切成 25 段"合法帧"，
+        这正是包头零填充产生超量伪解的直接机制。
+        """
+        zeros = b"\x00" * 100
+        # 长度值 0 → 帧长 4 == 帧头 4 → 不允许（修复前会走出 25 帧）
+        assert not walk(zeros, 0, "uint8", 4, DEFAULT_CONFIG).complete
+
+        # 每帧长度值都是 1（帧长 5 > 帧头 4）→ 应当完整走完 20 帧
+        good = bytes([1] + [0] * 4) * 20
+        res = walk(good, 0, "uint8", 4, DEFAULT_CONFIG)
+        assert res.complete and len(res.frames) == 20
 
     @pytest.mark.xfail(strict=False, reason=(
         "变长包头（包头长度随命令字变）在 frame_len = a·v + b 模型里无解："
