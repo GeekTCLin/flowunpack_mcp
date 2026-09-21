@@ -22,6 +22,11 @@ MCP 服务::
 
 from .__version__ import __version__, __version_info__
 from .analyzers import detect_length_field, evaluate_candidate, explain
+from .bidir import (
+    BidirectionalResult,
+    Coupling,
+    analyze_bidirectional,
+)
 from .config import AnalysisConfig, DEFAULT_CONFIG
 from .detectors import (
     Detection,
@@ -83,6 +88,8 @@ __all__ = [
     # 字段级推断（P1）
     "infer_fields", "infer_message_types", "split_header_payload",
     "field_boundaries", "detect_trailer_checksum",
+    # 双向流联合推断（P2-8）
+    "analyze_bidirectional", "BidirectionalResult", "Coupling",
     # 输出
     "render_report",
 ]

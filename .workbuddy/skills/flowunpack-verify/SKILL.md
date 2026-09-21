@@ -20,7 +20,7 @@ PY="C:/Users/Xi/.workbuddy/binaries/python/envs/default/Scripts/python.exe"
 
 每次运行都 `> 输出文件 2>&1`，再用 Read 工具读该文件。
 
-## 一键回归（7 项，全部应 exit 0）
+## 一键回归（8 项，全部应 exit 0）
 
 不要用 `&&` 串联后只看尾部——分开跑并逐个记录退出码：
 
@@ -31,21 +31,23 @@ PY="C:/Users/Xi/.workbuddy/binaries/python/envs/default/Scripts/python.exe"
 "$PY" bench/diag_fields.py          > _diagf.txt  2>&1; echo "diagf=$?"
 "$PY" bench/diag_templates.py       > _diag.txt   2>&1; echo "diag=$?"
 "$PY" bench/diag_header_body.py     > _hb.txt     2>&1; echo "hb=$?"
+"$PY" bench/diag_bidir.py           > _bidir.txt  2>&1; echo "bidir=$?"
 "$PY" bench/check_mcp_templates.py  > _check.txt  2>&1; echo "check=$?"
 "$PY" tests/smoke_mcp_stdio.py      > _smoke.txt  2>&1; echo "smoke=$?"
 ```
 
-### 期望基线（2026-09 起，P1 与包头布局用例之后）
+### 期望基线（2026-09-21 起，P2-8/P2-9 之后）
 
 | 检查 | 期望 |
 |---|---|
-| pytest | `165 passed, 3 xfailed` |
+| pytest | `208 passed, 3 skipped, 3 xfailed` |
 | benchmark 汇总 | 正样本 33/33，模板正确 33，P/R/F1/FMS = 1.000，负样本误报 0/9 |
 | diag_fields | crc32 尾部 `checksum@-4`、typed-hdr 的 `timestamp/ipv4`、multi-type 分 3 簇 |
 | diag_templates | 4 个模板正样本 `det=True`；random512~65536 与 no-delim-text 全部 `det=False` |
 | diag_header_body | 前 6 个"支持"用例全对；变长包头/BCD 应显示"不支持" |
+| diag_bidir | 用例 1~4 的耦合证据开关符合期望；用例 7 两组必须出现 `[修复]`（s2c → 10 帧） |
 | check_mcp_templates | 四模板 `framing.kind` 各自正确，报告含 `[分帧结构]` / `[字段推断]` |
-| smoke_mcp_stdio | `RESULT: PASS`，7 个工具注册 |
+| smoke_mcp_stdio | `RESULT: PASS`，**8** 个工具注册（含 `analyze_bidirectional`） |
 
 **3 项 xfail 是已知失败，不是噪声**：零填充包头、变长包头、BCD 长度。
 它们用 `strict=False`，一旦被修好会报 XPASS——那时应当把 `xfail` 标记删掉并
@@ -75,6 +77,25 @@ PY="C:/Users/Xi/.workbuddy/binaries/python/envs/default/Scripts/python.exe"
 - 任何"熵阈值"类判据都要随样本量自适应（n 个样本单列熵上限 log2(min(n,256))），
   固定阈值在十几帧的流上永远触发不了。
 
+### 两条 P2 期间踩过的坑（改对应模块前先读）
+
+**改 `segmentation.py` 的分阶段搜索（P2-9）**：短路判据必须与最终决策用**同一条**
+候选级证据（`matched_gap ≥ min_matched_gap`），否则就是"悄悄换结论换来的加速"。
+`tests/test_staged_search.py` 里有一条**不等于**：8 帧 varint 上全量搜索拒绝、
+分阶段接受（全量的 top-K 被冷子空间伪解挤占）。断言写成"分阶段 ≥ 全量"，
+别改成严格相等，那不是 bug。
+
+**改 `bidir.py`（P2-8）**：判断"两侧结论矛盾"只能比较**长度字段身份**
+`(offset, format, scale, variable_overhead)`，**不能包含 `overhead`** ——
+请求与响应的包头长度不同是常态（响应多带状态码/时间戳），把它当冲突会
+无端下调正常协议的置信度（实测 0.870→0.783）。`overhead` 差异只意味着
+"结构不可迁移"，不意味着"冲突"。
+
+另注：`bidir` 的"补全"路径（一侧完全未检出、靠另一侧迁移补上）在随机搜索
+400 组样本里命中 0 次 —— 因为 hint 与自身搜索都要求走查完整且 ≥ `min_frames`。
+真正的价值在**冲突裁决**（`synth.make_constant_length_pair`，默认 `response_body=12`
+即触发）。不要为了"演示补全"去构造不自然的样本。
+
 ## 清理
 
 跑完删掉临时文件（用 Python，别用 `rm`）：
@@ -83,7 +104,7 @@ PY="C:/Users/Xi/.workbuddy/binaries/python/envs/default/Scripts/python.exe"
 import os
 root = r'E:\opencode_workspace\unpacket'
 for n in ('_pytest.txt','_bench.txt','_diagf.txt','_diag.txt','_hb.txt',
-          '_check.txt','_smoke.txt','_hb2.txt'):
+          '_check.txt','_smoke.txt','_hb2.txt','_bidir.txt'):
     p = os.path.join(root, n)
     if os.path.exists(p): os.remove(p)
 ```

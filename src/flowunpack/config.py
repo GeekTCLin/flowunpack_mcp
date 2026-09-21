@@ -162,6 +162,42 @@ class AnalysisConfig:
     probe_stage1_frames: int = 4    # 筛查：帧数上限（帧小的时候起作用）
     probe_stage1_bytes: int = 8192  # 筛查：字节预算上限（帧大的时候起作用）
 
+    # ---- 双向流联合推断（P2-8，见 bidir.py）----
+    # 请求/响应帧长序列的相关系数门槛：达到即为"长度呼应"证据。
+    # 只作为**辅助**证据（权重 0.10），因为长度相关也可能由"载荷大小相近"造成。
+    coupling_corr_threshold: float = 0.7
+
+    # ---- 分阶段搜索（P2-9，见 segmentation._search_staged）----
+    # 全量假设空间是 scales × formats × offsets × overhead，其中 scale>1 与冷门
+    # 编码占了约 6/7，而绝大多数协议落在 scale=1 + 常见编码里。因此先只搜这个
+    # 核心子空间；只有它没能给出强证据时，才**补搜剩余子空间**（不重复已搜的
+    # 部分），合并后再决策 —— 因此最坏情况与全量同价，命中时省约 70%。
+    #
+    # 标定（bench/calibrate_staged.py）：负样本在阶段 1 的候选级 gap 最高 0.119，
+    # 长度前缀正样本普遍 ≥0.4 —— 沿用 min_matched_gap=0.25 作短路门槛即可，
+    # 安全余量充足。真解是 scale>1 的样本阶段 1 gap 仅 0.12 左右，会自动落到
+    # 补搜分支（这是设计意图：它们本来就必须在完整空间里找）。
+    staged_search: bool = True
+    stage1_scales: Tuple[int, ...] = (1,)
+    stage1_formats: Tuple[str, ...] = (
+        "uint8", "uint16_be", "uint16_le", "uint32_be", "uint32_le", "varint",
+    )
+
+    # ---- 置换检验用的搜索配置（P2-9）----
+    # 全局 max-vs-max 要在采样窗口上跑 trials+1 次完整搜索，这是负样本的主要成本。
+    # 观测侧与打乱侧**用同一套配置**，因此无偏性不变；缩小假设空间只是降低
+    # "打乱后偶然撞出高分伪解"的机会。
+    #
+    # 标定：精简后负样本 gap 仍全为负（max -0.009），正样本反而更高
+    # （varint -0.016 → +0.098）—— 分离度变好而非变差。
+    # 为避免"真解是冷门编码"时观测侧搜不到它，运行时会把主搜索的最佳假设
+    # 动态并入该集合（见 segmentation._perm_config）。
+    perm_scales: Tuple[int, ...] = (1,)
+    perm_formats: Tuple[str, ...] = (
+        "uint8", "uint16_be", "uint16_le", "uint32_be", "uint32_le", "varint",
+    )
+    perm_max_offset: int = 16
+
     # ---- 候选验证 ----
     # 启发式分数只能排序，不能定案：实测真解可能排在第 15~48 名
     # （伪解帧数少但其它维度占优）。因此对分数最高的前 K 个**不同帧边界**候选

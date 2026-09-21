@@ -8,6 +8,7 @@
 --------
 ``analyze_stream``   流模式分析（推荐：Wireshark 重组流就是连续字节）
 ``analyze_packets``  逐包模式分析（当上游能给出每个 TCP 包的 payload 边界时）
+``analyze_bidirectional``  双向流联合推断（请求/响应两条流互相解歧义）
 ``decode_stream``    用已知帧结构切分流（二次调用，避免重复检测）
 ``explain_spec``     把帧结构翻译成人类可读的说明
 ``list_formats``     列出支持的长度字段编码
@@ -26,6 +27,7 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 from flowunpack import __version__                      # noqa: E402
+from flowunpack.bidir import analyze_bidirectional       # noqa: E402
 from flowunpack.codecs import available_formats          # noqa: E402
 from flowunpack.config import AnalysisConfig, DEFAULT_CONFIG  # noqa: E402
 from flowunpack.engine import (                          # noqa: E402
@@ -73,6 +75,9 @@ _INSTRUCTIONS = """TCP 流二进制协议结构启发式检测服务。
 定长帧同样支持；其中定长帧**无法自证**，只作为低置信结论并在 warnings 中提示。
 
 若上游能给出逐包 payload 边界，改用 analyze_packets 精度更高。
+**若能同时拿到一条双向连接的两个方向，优先用 analyze_bidirectional**：
+请求与响应出自同一份格式定义，交叉验证可以解掉单方向无法分辨的歧义
+（实测能纠正被"自信伪解"锁定的错误分帧），也能识别出两条流其实无关。
 已确定长度前缀结构后，后续调用可直接使用 decode_stream 跳过检测。
 """
 
@@ -150,6 +155,42 @@ def tool_analyze_packets(packets: Any,
     out["ok"] = True
     if include_text_report:
         out["text_report"] = render_report(result)
+    return out
+
+
+def tool_analyze_bidirectional(c2s: str, s2c: str,
+                               encoding: str = "auto",
+                               max_offset: Optional[int] = None,
+                               max_overhead: Optional[int] = None,
+                               verbose: bool = False) -> Dict[str, Any]:
+    """双向流联合推断：把一条双向连接的两个方向一起分析。
+
+    为什么要两条流：单条流可能同时自洽于多种切法（长度前缀分帧本身有歧义）。
+    请求与响应出自同一份格式定义，因此一方的结构可以用**可证伪**的方式
+    约束另一方 —— 用它去切对方，能完整走完才说明两边共用同一套帧长公式。
+
+    返回的 ``coupling`` 给出三条独立证据（结构可迁移 / 类型双射 / 长度相关）
+    与综合强度；``coupling.repaired`` 记录被跨方向迁移**改写**的结论（例如
+    某一方向因恒定帧长被伪解锁定、由另一方向纠正回真解），
+    ``coupling.conflicts`` 记录无法裁决的分歧。
+
+    :param c2s: 客户端→服务端方向的 hex/base64
+    :param s2c: 服务端→客户端方向的 hex/base64
+    """
+    try:
+        a_bytes = coerce_bytes(c2s, encoding=encoding)
+        b_bytes = coerce_bytes(s2c, encoding=encoding)
+    except InputError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not a_bytes or not b_bytes:
+        return {"ok": False, "error": "两个方向都必须是非空流"}
+
+    cfg = _cfg_from(max_offset=max_offset, max_overhead=max_overhead)
+    r = analyze_bidirectional(a_bytes, b_bytes, cfg)
+    out = r.to_dict()
+    out["c2s"] = _slim(out["c2s"], verbose)
+    out["s2c"] = _slim(out["s2c"], verbose)
+    out["ok"] = True
     return out
 
 
@@ -250,6 +291,7 @@ def tool_service_info() -> Dict[str, Any]:
             "delim_alpha": DEFAULT_CONFIG.delim_alpha,
             "delim_min_lift": DEFAULT_CONFIG.delim_min_lift,
             "fixed_min_constant_ratio": DEFAULT_CONFIG.fixed_min_constant_ratio,
+            "coupling_corr_threshold": DEFAULT_CONFIG.coupling_corr_threshold,
         },
         "field_kinds": ["magic", "constant", "enum", "length", "checksum",
                         "text", "ipv4", "timestamp", "float", "counter",
@@ -310,6 +352,21 @@ def create_server(name: str = SERVER_NAME) -> Any:
             verbose=verbose, include_text_report=include_text_report),
             ensure_ascii=False)
 
+    @server.tool(name="analyze_bidirectional",
+                 description="双向流联合推断：同时传入一条双向连接的 c2s 与 s2c 两个"
+                             "方向（hex/base64），利用\"请求与响应共用同一套格式定义\""
+                             "这一先验互相解歧义。会交叉验证帧结构是否可跨方向迁移、"
+                             "请求/响应消息类型是否构成双射、两侧帧长是否相关，"
+                             "并在某一方向被伪解锁定时按可迁移性裁定纠正。"
+                             "两条互不相关的流会被识别出来并下调置信度。")
+    def _analyze_bidirectional(c2s: str, s2c: str, encoding: str = "auto",
+                               max_offset: Optional[int] = None,
+                               max_overhead: Optional[int] = None,
+                               verbose: bool = False) -> str:
+        return json.dumps(tool_analyze_bidirectional(
+            c2s, s2c, encoding=encoding, max_offset=max_offset,
+            max_overhead=max_overhead, verbose=verbose), ensure_ascii=False)
+
     @server.tool(name="decode_stream",
                  description="用已确定的帧结构切分流（跳过检测）。"
                              "frame_len = scale*value + overhead，"
@@ -350,6 +407,7 @@ def create_server(name: str = SERVER_NAME) -> Any:
     server.fn = {                                        # type: ignore[attr-defined]
         "analyze_stream": tool_analyze_stream,
         "analyze_packets": tool_analyze_packets,
+        "analyze_bidirectional": tool_analyze_bidirectional,
         "decode_stream": tool_decode_stream,
         "explain_spec": tool_explain_spec,
         "hexdump": tool_hexdump,

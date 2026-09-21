@@ -8,7 +8,7 @@ from __future__ import annotations
 import random
 import struct
 import zlib
-from typing import Tuple
+from typing import Optional, Tuple
 
 from .codecs import encode_varint
 from .models import LengthFieldSpec
@@ -33,6 +33,7 @@ __all__ = [
     "make_bcd_length_stream",
     "make_text_stream",
     "make_no_delimiter_text",
+    "make_request_response_pair",
     "random_stream",
 ]
 
@@ -519,6 +520,134 @@ def make_no_delimiter_text(*, length: int = 400, seed: int = 15) -> bytes:
     rng = random.Random(seed)
     alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,"
     return bytes(rng.choice(alphabet) for _ in range(length))
+
+
+def make_request_response_pair(
+        *, pairs: int = 8, fmt: str = "uint16_be",
+        len_offset: int = 2, header_len: int = 4,
+        response_header_len: Optional[int] = None,
+        cmd_offset: int = 0, cmd_cycle: Tuple[int, ...] = (0x01, 0x02),
+        response_cmd_delta: int = 0x80,
+        min_body: int = 6, max_body: int = 40,
+        length_factor: float = 2.0, length_bias: int = 4,
+        seed: int = 31, payload: str = "bytes",
+        filler: int = 0x5A,
+) -> Tuple[bytes, bytes, LengthFieldSpec, LengthFieldSpec]:
+    """生成一对**语义耦合**的请求流 / 响应流（供双向推断 :mod:`.bidir` 使用）。
+
+    三条耦合证据都被刻意构造出来，便于分别验证：
+
+    * **结构可迁移** —— 两个方向共用帧长公式（同 ``len_offset`` / ``fmt``）。
+      把 ``response_header_len`` 设成与 ``header_len`` 不同即可**关掉**这条证据
+      （overhead 不同，迁移必然走不通），用来验证"结构不同但类型仍呼应"。
+    * **类型映射** —— 响应命令字 = 请求命令字 + ``response_cmd_delta``，
+      于是请求类型序列与响应类型序列构成稳定双射。
+    * **长度相关** —— 响应体长 = 请求体长 × ``length_factor`` + ``length_bias``。
+
+    :param filler: 包头里除命令字与长度字段外的填充字节。**别填 0**：零填充
+        保留字段会让长度前缀检测产生远多于真解的伪解（见
+        :func:`make_zero_filled_header_stream`）。
+    :return: ``(c2s, s2c, c2s 的期望 spec, s2c 的期望 spec)``
+    """
+    if not cmd_cycle:
+        raise ValueError("cmd_cycle 至少需要一个取值")
+    rsp_header_len = header_len if response_header_len is None \
+        else response_header_len
+    width = len(_uint(0, fmt))
+    if len_offset + width > header_len or len_offset + width > rsp_header_len:
+        raise ValueError("长度字段放不进包头")
+    if cmd_offset >= header_len or cmd_offset >= rsp_header_len:
+        raise ValueError("命令字放不进包头")
+
+    rng = random.Random(seed)
+    c2s = bytearray()
+    s2c = bytearray()
+
+    def _header(hlen: int, cmd: int, body_len: int) -> bytes:
+        h = bytearray([filler] * hlen)
+        h[cmd_offset] = cmd & 0xFF
+        h[len_offset:len_offset + width] = _uint(body_len, fmt)
+        return bytes(h)
+
+    for i in range(pairs):
+        cmd = cmd_cycle[i % len(cmd_cycle)]
+        body = _payload(rng.randint(min_body, max_body), rng, payload)
+        c2s += _header(header_len, cmd, len(body)) + body
+
+        rlen = max(1, int(len(body) * length_factor) + length_bias)
+        s2c += _header(rsp_header_len, (cmd + response_cmd_delta) & 0xFF,
+                       rlen) + _payload(rlen, rng, payload)
+
+    endian = "little" if fmt.endswith("_le") else "big"
+    spec_c = LengthFieldSpec(offset=len_offset, format=fmt, width=width,
+                             overhead=header_len, semantics="body_length",
+                             header_len=header_len, body_offset=header_len,
+                             endian=endian, scale=1)
+    spec_s = LengthFieldSpec(offset=len_offset, format=fmt, width=width,
+                             overhead=rsp_header_len, semantics="body_length",
+                             header_len=rsp_header_len,
+                             body_offset=rsp_header_len,
+                             endian=endian, scale=1)
+    return bytes(c2s), bytes(s2c), spec_c, spec_s
+
+
+def make_constant_length_pair(*, pairs: int = 10, fmt: str = "uint16_be",
+                              len_offset: int = 2, header_len: int = 4,
+                              response_body: int = 12,
+                              min_body: int = 8, max_body: int = 40,
+                              cmd_offset: int = 0, cmd_cycle: Tuple[int, ...] = (0x01, 0x02),
+                              response_cmd_delta: int = 0x80,
+                              seed: int = 7, payload: str = "bytes",
+                              filler: int = 0x5A,
+                              ) -> Tuple[bytes, bytes, LengthFieldSpec]:
+    """一对"请求帧长变化 / 响应帧长恒定"的流 —— 双向**裁决**的专用样本。
+
+    为什么单靠一侧会出错：响应侧所有帧等长，于是长度字段的取值跨帧恒定。
+    块置换检验（:func:`flowunpack.segmentation._perm_matched`）打乱的是块顺序，
+    **不会改变这些恒定的长度字节**，因此一个伪解同样能"打乱后照样走通" ——
+    真解与伪解在置换检验下无法区分。而 stage-1 短路一旦先撞上伪解就会
+    直接收工（P2-9），得到一个**自信的错误结论**（实测 5 帧、匹配 gap 0.74）。
+
+    这类样本的真解只能靠方向间的一致性裁决：请求侧帧长多变、真解有明确的
+    置换优势，其结构能完整解释响应侧，反向则解释不了，于是共同结构唯一定。
+
+    :return: ``(c2s, s2c, 两侧共用的期望 spec)``
+    """
+    if not cmd_cycle:
+        raise ValueError("cmd_cycle 至少需要一个取值")
+    width = len(_uint(0, fmt))
+    if len_offset + width > header_len:
+        raise ValueError("长度字段放不进包头")
+    if cmd_offset >= header_len:
+        raise ValueError("命令字放不进包头")
+    if response_body < 1:
+        raise ValueError("response_body 必须为正")
+
+    rng = random.Random(seed)
+    c2s = bytearray()
+    s2c = bytearray()
+
+    def _frame(hlen: int, cmd: int, body_len: int) -> bytes:
+        # 包头填充用**非零**常量：全零保留字段会让长度前缀检测产生远多于真解
+        # 的伪解（见 make_zero_filled_header_stream），那是另一类已知缺陷，
+        # 不应混进本样本里干扰对"裁决"能力的验证。
+        h = bytearray([filler] * hlen)
+        h[cmd_offset] = cmd & 0xFF
+        h[len_offset:len_offset + width] = _uint(body_len, fmt)
+        return bytes(h) + _payload(body_len, rng, payload)
+
+    for i in range(pairs):
+        cmd = cmd_cycle[i % len(cmd_cycle)]
+        c2s += _frame(header_len, cmd, rng.randint(min_body, max_body))
+        s2c += _frame(header_len, (cmd + response_cmd_delta) & 0xFF,
+                      response_body)
+
+    endian = "little" if fmt.endswith("_le") else "big"
+    spec = LengthFieldSpec(offset=len_offset, format=fmt, width=width,
+                           overhead=header_len, semantics="body_length",
+                           header_len=header_len, body_offset=header_len,
+                           endian=endian, scale=1)
+    return bytes(c2s), bytes(s2c), spec
 
 
 def random_stream(n: int = 512, seed: int = 6) -> bytes:

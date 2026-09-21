@@ -25,7 +25,8 @@ from .detectors import Detection, choose_framing, detect_templates
 from .fields import (infer_fields, infer_message_types, split_header_payload)
 from .io_utils import join_packets
 from .models import AnalysisResult, Frame, FramingSpec, LengthFieldSpec
-from .segmentation import apply_spec, segment_stream
+from .segmentation import apply_spec, segment_stream, walk
+from .segmentation import _score_walk
 
 __all__ = ["analyze_stream", "analyze_packets", "analyze", "resolve_spec"]
 
@@ -177,12 +178,18 @@ def _reject_reason(result: AnalysisResult, diag: Dict, cfg: AnalysisConfig,
                100.0 * float(top.evidence.get("constant_ratio", 0.0))))
 
 
-def analyze_stream(data: bytes, cfg: AnalysisConfig = DEFAULT_CONFIG) -> AnalysisResult:
+def analyze_stream(data: bytes, cfg: AnalysisConfig = DEFAULT_CONFIG,
+                   hint: Optional[LengthFieldSpec] = None) -> AnalysisResult:
     """分析一条连续流。
 
     先跑**长度前缀**搜索（``segment_stream``，含置换检验），再跑**分隔符 /
     ASCII 长度 / 定长**三个探测器，最后按"覆盖率优先、证据强度次之"集成裁决
     （见 :func:`flowunpack.detectors.choose_framing`）。
+
+    :param hint: 已知的长度字段结构（例如从**另一个方向**迁移过来的）。
+        给出时先尝试直接用它切分：能完整走完且无剩余即采纳（``accepted_by``
+        为 ``"hint"``），省掉整轮搜索；**迁移失败则退回正常搜索**，因此这个
+        参数只会让结果更好，不会更差。双向流联合推断（:mod:`.bidir`）据此实现。
     """
     result = AnalysisResult(
         mode="stream", ok=False, message="", input_bytes=len(data),
@@ -193,26 +200,53 @@ def analyze_stream(data: bytes, cfg: AnalysisConfig = DEFAULT_CONFIG) -> Analysi
         result.message = "输入过短（< 4 字节），无法分析"
         return result
 
-    # ---- 模板 1：长度前缀（唯一需要完整搜索 + 置换检验的模板）----
-    spec, candidates, best_walk, diag = segment_stream(data, cfg)
-    result.candidates = candidates
-    result.statistics["diagnostics"] = diag
-
+    # ---- 模板 0：已知结构迁移（双向联合推断 / 用户指定）----
     detections: List[Detection] = []
     lp_frames: Optional[List[Frame]] = None
-    chosen = diag.get("chosen_rank", 0)
-    raw_score = (candidates[chosen].score if candidates and chosen < len(candidates)
-                 else (candidates[0].score if candidates else 0.0))
-    if spec is not None and best_walk is not None:
-        lp_frames, _lp_left, _lp_trunc = apply_spec(data, spec, cfg)
-        spans = [(f.offset, f.length) for f in lp_frames if not f.truncated]
-        detections.append(Detection(
-            kind="length_prefixed", frames=spans,
-            spec=FramingSpec(kind="length_prefixed", length_field=spec,
-                             confidence=raw_score),
-            score=raw_score, self_verified=True,
-            evidence={"accepted_by": diag.get("accepted_by"),
-                      "frames": len(spans)}))
+    _lp_left = 0
+    _lp_trunc = False
+    candidates: List = []
+    diag: Dict[str, Any] = {}
+    if hint is not None:
+        w = walk(data, hint.offset, hint.format, hint.overhead, cfg,
+                 count_width=hint.variable_overhead, scale=hint.scale)
+        if w.complete and len(w.frames) >= cfg.min_frames:
+            score = _score_walk(data, w, cfg, 1)
+            lp_frames, _lp_left, _lp_trunc = apply_spec(data, hint, cfg)
+            detections.append(Detection(
+                kind="length_prefixed",
+                frames=[(p, l) for p, l in w.frames],
+                spec=FramingSpec(kind="length_prefixed", length_field=hint,
+                                 confidence=score),
+                score=score, self_verified=True,
+                evidence={"accepted_by": "hint", "frames": len(w.frames)}))
+            diag = {"accepted_by": "hint", "chosen_rank": 0,
+                    "source": "hint", "frames": len(w.frames)}
+        else:
+            hint = None                 # 迁移失败 → 退回常规搜索
+
+    if hint is None:
+        # ---- 模板 1：长度前缀（唯一需要完整搜索 + 置换检验的模板）----
+        spec, candidates, best_walk, diag = segment_stream(data, cfg)
+        result.candidates = candidates
+        result.statistics["diagnostics"] = diag
+
+        chosen = diag.get("chosen_rank", 0)
+        raw_score = (candidates[chosen].score
+                     if candidates and chosen < len(candidates)
+                     else (candidates[0].score if candidates else 0.0))
+        if spec is not None and best_walk is not None:
+            lp_frames, _lp_left, _lp_trunc = apply_spec(data, spec, cfg)
+            spans = [(f.offset, f.length) for f in lp_frames if not f.truncated]
+            detections.append(Detection(
+                kind="length_prefixed", frames=spans,
+                spec=FramingSpec(kind="length_prefixed", length_field=spec,
+                                 confidence=raw_score),
+                score=raw_score, self_verified=True,
+                evidence={"accepted_by": diag.get("accepted_by"),
+                          "frames": len(spans)}))
+
+    result.statistics["diagnostics"] = diag
 
     # ---- 模板 2/3/4：分隔符 / ASCII 长度 / 定长 ----
     template_dets, fixed_hyps = detect_templates(data, cfg)

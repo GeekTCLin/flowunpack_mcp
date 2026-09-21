@@ -437,15 +437,17 @@ def _dedup_key(res: WalkResult) -> tuple:
     return (structural, width, -res.scale, -res.offset, -len(res.format))
 
 
-def _search(data: bytes, cfg: AnalysisConfig
-            ) -> Tuple[List[Tuple[float, WalkResult, int]], Dict]:
-    """枚举全部假设并打分。返回 ``(得分列表, 诊断信息)``，不做接受判定。"""
+def _collect_successes(data: bytes, cfg: AnalysisConfig
+                       ) -> Tuple[List[WalkResult], Dict]:
+    """枚举假设空间，收集全部"走完且无剩余"的走查结果。
 
+    只负责枚举与走查，**不做分组打分** —— 分阶段搜索需要把多个子空间的结果
+    合并后再统一打分（否则一致性证据 agreement 会被拆散）。
+    """
     starts = [0]
     if cfg.scan_start_offsets:
         starts.extend(range(1, min(cfg.max_start_offset, len(data))))
 
-    # 1) 收集所有"走完且无剩余"的假设
     successes: List[WalkResult] = []
     tried = 0
     best_partial_frames = 0      # 已完成走查但帧数不足 min_frames 的最好成绩
@@ -485,17 +487,27 @@ def _search(data: bytes, cfg: AnalysisConfig
                             best_partial_frames = max(best_partial_frames,
                                                       len(full.frames))
 
-    diag = {"hypotheses_tried": tried, "success_groups": 0, "success_walks": 0,
-            "best_partial_frames": best_partial_frames}
+    diag = {"hypotheses_tried": tried, "best_partial_frames": best_partial_frames}
+    return successes, diag
+
+
+def _rank_successes(data: bytes, successes: Sequence[WalkResult],
+                    cfg: AnalysisConfig, diag: Optional[Dict] = None
+                    ) -> Tuple[List[Tuple[float, WalkResult, int]], Dict]:
+    """按帧边界签名分组 → 每组取最优代表 → 打分排序。"""
+    diag = dict(diag or {})
+    diag.setdefault("hypotheses_tried", 0)
+    diag.setdefault("best_partial_frames", 0)
     if not successes:
+        diag.update({"success_groups": 0, "success_walks": 0})
         return [], diag
 
-    # 2) 按帧边界签名分组 —— 组内假设数 = 一致性证据
+    # 按帧边界签名分组 —— 组内假设数 = 一致性证据
     groups: Dict[Tuple, List[WalkResult]] = defaultdict(list)
     for res in successes:
         groups[res.signature].append(res)
 
-    # 3) 每组取最优代表并评分
+    # 每组取最优代表并评分
     scored: List[Tuple[float, WalkResult, int]] = []
     for members in groups.values():
         best = max(members, key=_dedup_key)
@@ -504,6 +516,111 @@ def _search(data: bytes, cfg: AnalysisConfig
     scored.sort(key=lambda x: (x[0], _dedup_key(x[1])), reverse=True)
     diag.update({"success_groups": len(groups), "success_walks": len(successes)})
     return scored, diag
+
+
+def _search(data: bytes, cfg: AnalysisConfig
+            ) -> Tuple[List[Tuple[float, WalkResult, int]], Dict]:
+    """枚举**全部**假设并打分。返回 ``(得分列表, 诊断信息)``，不做接受判定。"""
+    successes, diag = _collect_successes(data, cfg)
+    return _rank_successes(data, successes, cfg, diag)
+
+
+def _subspace_configs(cfg: AnalysisConfig
+                      ) -> Tuple[AnalysisConfig, List[AnalysisConfig]]:
+    """把假设空间切成「核心子空间」与若干「补搜子空间」。
+
+    切分必须**互不重叠且并集为全量**，否则补搜后的结果与全量搜索不等价。
+    核心子空间 = ``stage1_scales × stage1_formats``；剩余部分切成两块：
+    ``(scales \\ stage1_scales) × 全部格式`` 与 ``stage1_scales × (formats \\ stage1_formats)``。
+    """
+    s1_scales = tuple(s for s in cfg.scales if s in cfg.stage1_scales)
+    s1_formats = tuple(f for f in cfg.formats if f in cfg.stage1_formats)
+    rest_scales = tuple(s for s in cfg.scales if s not in cfg.stage1_scales)
+    rest_formats = tuple(f for f in cfg.formats if f not in cfg.stage1_formats)
+    cfg1 = cfg.overridden(scales=s1_scales, formats=s1_formats)
+    subs: List[AnalysisConfig] = []
+    if rest_scales:
+        subs.append(cfg.overridden(scales=rest_scales))
+    if rest_formats:
+        subs.append(cfg.overridden(scales=s1_scales, formats=rest_formats))
+    return cfg1, subs
+
+
+def _search_staged(data: bytes, cfg: AnalysisConfig,
+                   accept=None) -> Tuple[List[Tuple[float, WalkResult, int]], Dict]:
+    """分阶段搜索：先搜核心子空间，证据不足时**补搜**剩余子空间。
+
+    ``accept(scored, data, cfg) -> bool`` 用于判断阶段 1 的证据是否已足以定案；
+    为 ``True`` 时直接短路返回（省掉约 6/7 的假设枚举）。
+
+    补搜**不重复**核心子空间已搜过的部分，因此最坏情况与全量搜索同价 ——
+    这是它与"先试一遍不行再重搜"的根本区别。
+    """
+    if not cfg.staged_search:
+        scored, diag = _search(data, cfg)
+        diag["staged"] = "off"
+        return scored, diag
+
+    cfg1, subs = _subspace_configs(cfg)
+    if not subs:                      # 无法切分（配置里核心 == 全量）
+        scored, diag = _search(data, cfg)
+        diag["staged"] = "off"
+        return scored, diag
+
+    pool, diag = _collect_successes(data, cfg1)
+    if pool:
+        scored, diag = _rank_successes(data, pool, cfg, diag)
+        if accept is not None and accept(scored, data, cfg):
+            diag["staged"] = "stage1"
+            return scored, diag
+
+    # ---- 补搜：只走剩余子空间 ----
+    tried = diag.get("hypotheses_tried", 0)
+    partial = diag.get("best_partial_frames", 0)
+    for sub in subs:
+        more, d = _collect_successes(data, sub)
+        pool = pool + more
+        tried += d.get("hypotheses_tried", 0)
+        partial = max(partial, d.get("best_partial_frames", 0))
+    diag = {"hypotheses_tried": tried, "best_partial_frames": partial}
+    scored, diag = _rank_successes(data, pool, cfg, diag)
+    diag["staged"] = "full"
+    return scored, diag
+
+
+def _matched_decision(scored, data: bytes, cfg: AnalysisConfig):
+    """用候选级置换检验判断当前候选集是否已足以定案。
+
+    :return: ``(选中下标, 各候选检验结果, 采样窗口)``；证据不足时 ``None``。
+    """
+    if not scored:
+        return None
+    top = scored[:max(1, cfg.verify_candidates)]
+    window = _perm_window(data, top[0][1], cfg)
+    matched = _perm_matched(window, [r for _, r, _ in top],
+                            [ag for _, _, ag in top], cfg)
+    if not matched:
+        return None
+    gaps = [m["gap"] for m in matched]
+    i = max(range(len(gaps)), key=lambda k: gaps[k])
+    if gaps[i] < cfg.min_matched_gap:
+        return None
+    return i, matched, window
+
+
+def _perm_config(cfg: AnalysisConfig, res: WalkResult) -> AnalysisConfig:
+    """置换检验专用的搜索配置：精简假设空间，但**并入主搜索的最佳假设**。
+
+    观测侧与打乱侧共用本配置，因此 max-vs-max 的无偏性不变；缩小空间只是降低
+    "打乱后偶然撞出高分伪解"的机会（实测反而提升了分离度，见 config 注释）。
+
+    并入主搜索最佳假设的 scale / format / offset 是必要的：否则真解是冷门编码
+    （如 uint24_be）时，观测侧会搜不到它而用伪解打分，把真实协议误拒。
+    """
+    scales = tuple(sorted(set(cfg.perm_scales) | {res.scale}))
+    formats = tuple(dict.fromkeys(tuple(cfg.perm_formats) + (res.format,)))
+    max_offset = max(cfg.perm_max_offset, res.offset + 1)
+    return cfg.overridden(scales=scales, formats=formats, max_offset=max_offset)
 
 
 def segment_stream(data: bytes, cfg: AnalysisConfig
@@ -535,7 +652,17 @@ def segment_stream(data: bytes, cfg: AnalysisConfig
     if len(data) < 4:
         return None, [], None, diagnostics
 
-    scored, diagnostics = _search(data, cfg)
+    caught: Dict[str, Any] = {}
+
+    def _accept(scored_, data_, cfg_) -> bool:
+        """阶段 1 的短路判据：与最终决策用的是**同一条**候选级证据。"""
+        dec = _matched_decision(scored_, data_, cfg_)
+        if dec is None:
+            return False
+        caught["decision"] = dec
+        return True
+
+    scored, diagnostics = _search_staged(data, cfg, _accept)
     if not scored:
         return None, [], None, diagnostics
 
@@ -552,6 +679,24 @@ def segment_stream(data: bytes, cfg: AnalysisConfig
                                 "scale": r.scale,
                                 "values": r.values[:12],
                                 "formula": sp.formula()}))
+
+    # ---- 阶段 1 短路：核心子空间已经给出足够强的证据 ----
+    dec = caught.get("decision")
+    if diagnostics.get("staged") == "stage1" and dec is not None:
+        chosen_rank, matched, window = dec
+        top1 = scored[:max(1, cfg.verify_candidates)]
+        gaps = [m["gap"] for m in matched]
+        diagnostics["window_bytes"] = len(window)
+        diagnostics["matched"] = [
+            {"format": r.format, "offset": r.offset, "overhead": r.overhead,
+             "scale": r.scale, "score": sc, "frames": len(r.frames),
+             "agreement": ag, "gap": m["gap"], "p_value": m["p_value"]}
+            for (sc, r, ag), m in zip(top1, matched)]
+        diagnostics["max_matched_gap"] = round(max(gaps), 4)
+        diagnostics["accepted_by"] = "matched"
+        diagnostics["chosen_rank"] = chosen_rank
+        return top1[chosen_rank][1].to_spec(), candidates, \
+            top1[chosen_rank][1], diagnostics
 
     top = scored[:max(1, cfg.verify_candidates)]
     window = _perm_window(data, top[0][1], cfg)
@@ -591,8 +736,13 @@ def segment_stream(data: bytes, cfg: AnalysisConfig
                             "frames": len(item[1].frames)})
         return item[1].to_spec(), candidates, item[1], diagnostics
 
-    glob = _perm_global(window, cfg)
+    # 观测侧与打乱侧共用同一套精简配置（并入主搜索最佳假设），无偏性不变。
+    pcfg = _perm_config(cfg, top[0][1])
+    glob = _perm_global(window, pcfg)
     diagnostics["global"] = glob
+    diagnostics["perm_config"] = {"scales": list(pcfg.scales),
+                                  "formats": list(pcfg.formats),
+                                  "max_offset": pcfg.max_offset}
     if glob is None or glob["gap"] < cfg.min_perm_gap:
         diagnostics["rejected_by"] = "permutation"
         return None, candidates, None, diagnostics

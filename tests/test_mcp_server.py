@@ -6,8 +6,10 @@ import pytest
 
 from flowunpack_mcp import server as mcp_server
 from flowunpack.synth import (
+    make_constant_length_pair,
     make_length_prefixed_stream,
     make_magic_length_stream,
+    make_request_response_pair,
     random_stream,
 )
 
@@ -84,6 +86,36 @@ class TestAnalyzePacketsTool:
         assert mcp_server.tool_analyze_packets([])["ok"] is False
 
 
+class TestAnalyzeBidirectionalTool:
+    def test_corroborated_pair(self):
+        c2s, s2c, _, _ = make_request_response_pair(pairs=8)
+        out = mcp_server.tool_analyze_bidirectional(c2s.hex(), s2c.hex())
+        assert out["ok"] is True
+        assert out["detected"] is True
+        assert out["coupling"]["structure_transferable"] is True
+        assert out["joint_confidence"] > 0.5
+
+    def test_conflict_arbitration_is_reported(self):
+        """恒定帧长的一侧被伪解锁定 → 工具结果里必须能看到修复记录。"""
+        c2s, s2c, _ = make_constant_length_pair(response_body=12)
+        out = mcp_server.tool_analyze_bidirectional(c2s.hex(), s2c.hex())
+        assert out["s2c"]["unit_count"] == 10
+        assert out["coupling"]["repaired"]
+        assert "修正" in out["message"]
+
+    def test_unrelated_streams_flagged(self):
+        out = mcp_server.tool_analyze_bidirectional(
+            random_stream(2048, seed=1).hex(), random_stream(2048, seed=2).hex())
+        assert out["detected"] is False
+        assert out["coupling"]["strength"] == 0.0
+
+    def test_json_serializable(self):
+        c2s, s2c, _, _ = make_request_response_pair(pairs=6)
+        raw = json.dumps(mcp_server.tool_analyze_bidirectional(
+            c2s.hex(), s2c.hex()), ensure_ascii=False)
+        assert "coupling" in raw
+
+
 class TestMiscTools:
     def test_list_formats(self):
         assert "uint16_be" in mcp_server.tool_list_formats()["formats"]
@@ -108,4 +140,5 @@ class TestMiscTools:
 class TestServerAssembly:
     def test_create_server_exposes_functions(self):
         srv = mcp_server.create_server()
-        assert set(srv.fn) >= {"analyze_stream", "decode_stream", "service_info"}
+        assert set(srv.fn) >= {"analyze_stream", "decode_stream", "service_info",
+                               "analyze_bidirectional"}
