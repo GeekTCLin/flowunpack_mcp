@@ -1,0 +1,11 @@
+{
+  "_comment": "把下面的 command / args 并入客户端的 MCP 配置（如 ~/.workbuddy/mcp.json）。已按当前环境填好绝对路径；换机器时替换 command 与 args[0] 即可。注意 Windows 路径用正斜杠。",
+  "mcpServers": {
+    "flowunpack": {
+      "command": "C:/Users/Xi/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["E:/opencode_workspace/unpacket/mcp_server.py"],
+      "env": {},
+      "description": "TCP 流协议结构启发式检测（长度前缀识别 / 自动分帧）"
+    }
+  }
+}

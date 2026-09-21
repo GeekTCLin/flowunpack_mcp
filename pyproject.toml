@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flowunpack"
+dynamic = ["version"]
+description = "TCP 流二进制协议结构启发式检测（长度前缀识别 / 自动分帧），可作为 MCP 服务供 Wireshark MCP 调用"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "flowunpack contributors" }]
+keywords = ["pcap", "wireshark", "tcp", "protocol", "reverse-engineering", "mcp", "unpack"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: System :: Networking :: Monitoring",
+    "Intended Audience :: Developers",
+]
+dependencies = []
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0"]
+pcap = ["scapy>=2.4.5"]
+dev = ["pytest>=7.0", "mcp>=1.0", "scapy>=2.4.5"]
+
+[project.scripts]
+flowunpack = "flowunpack.__main__:main"
+flowunpack-mcp = "flowunpack_mcp.server:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "flowunpack.__version__.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = "--deselect tests/smoke_mcp_stdio.py"

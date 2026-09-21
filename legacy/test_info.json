@@ -1,0 +1,884 @@
+[
+  {
+    "name": "1B_Length_Head_BE",
+    "flow_id": 1,
+    "body_len": 5,
+    "packet_len": 60,
+    "expected_offset": 0,
+    "expected_format": "uint8",
+    "raw_hex": "18200000000000054141414141"
+  },
+  {
+    "name": "1B_Length_Head_BE",
+    "flow_id": 1,
+    "body_len": 50,
+    "packet_len": 105,
+    "expected_offset": 0,
+    "expected_format": "uint8",
+    "raw_hex": "18200000000000324242424242424242424242424242424242424242424242424242424242424242424242424242424242424242424242424242"
+  },
+  {
+    "name": "1B_Length_Head_BE",
+    "flow_id": 1,
+    "body_len": 100,
+    "packet_len": 155,
+    "expected_offset": 0,
+    "expected_format": "uint8",
+    "raw_hex": "<large: 100 bytes>"
+  },
+  {
+    "name": "1B_Length_Head_BE",
+    "flow_id": 1,
+    "body_len": 200,
+    "packet_len": 255,
+    "expected_offset": 0,
+    "expected_format": "uint8",
+    "raw_hex": "<large: 200 bytes>"
+  },
+  {
+    "name": "2B_Length_Head_BE",
+    "flow_id": 2,
+    "body_len": 5,
+    "packet_len": 61,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "20000000000000054545454545"
+  },
+  {
+    "name": "2B_Length_Head_BE",
+    "flow_id": 2,
+    "body_len": 100,
+    "packet_len": 156,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "<large: 100 bytes>"
+  },
+  {
+    "name": "2B_Length_Head_BE",
+    "flow_id": 2,
+    "body_len": 255,
+    "packet_len": 311,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "<large: 255 bytes>"
+  },
+  {
+    "name": "2B_Length_Head_BE",
+    "flow_id": 2,
+    "body_len": 300,
+    "packet_len": 356,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "<large: 300 bytes>"
+  },
+  {
+    "name": "2B_Length_Head_LE",
+    "flow_id": 3,
+    "body_len": 8,
+    "packet_len": 64,
+    "expected_offset": 0,
+    "expected_format": "uint16_le",
+    "raw_hex": "20000000000008004949494949494949"
+  },
+  {
+    "name": "2B_Length_Head_LE",
+    "flow_id": 3,
+    "body_len": 64,
+    "packet_len": 120,
+    "expected_offset": 0,
+    "expected_format": "uint16_le",
+    "raw_hex": "20000000000040004a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a"
+  },
+  {
+    "name": "2B_Length_Head_LE",
+    "flow_id": 3,
+    "body_len": 200,
+    "packet_len": 256,
+    "expected_offset": 0,
+    "expected_format": "uint16_le",
+    "raw_hex": "<large: 200 bytes>"
+  },
+  {
+    "name": "2B_Length_Head_LE",
+    "flow_id": 3,
+    "body_len": 500,
+    "packet_len": 556,
+    "expected_offset": 0,
+    "expected_format": "uint16_le",
+    "raw_hex": "<large: 500 bytes>"
+  },
+  {
+    "name": "4B_Length_Head_BE",
+    "flow_id": 4,
+    "body_len": 100,
+    "packet_len": 158,
+    "expected_offset": 0,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 100 bytes>"
+  },
+  {
+    "name": "4B_Length_Head_BE",
+    "flow_id": 4,
+    "body_len": 1000,
+    "packet_len": 1058,
+    "expected_offset": 0,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 1000 bytes>"
+  },
+  {
+    "name": "4B_Length_Head_BE",
+    "flow_id": 4,
+    "body_len": 5000,
+    "packet_len": 5058,
+    "expected_offset": 0,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 5000 bytes>"
+  },
+  {
+    "name": "4B_Length_Head_BE",
+    "flow_id": 4,
+    "body_len": 10000,
+    "packet_len": 10058,
+    "expected_offset": 0,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 10000 bytes>"
+  },
+  {
+    "name": "4B_Length_Head_LE",
+    "flow_id": 5,
+    "body_len": 50,
+    "packet_len": 108,
+    "expected_offset": 0,
+    "expected_format": "uint32_le",
+    "raw_hex": "00000000320000005151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151"
+  },
+  {
+    "name": "4B_Length_Head_LE",
+    "flow_id": 5,
+    "body_len": 200,
+    "packet_len": 258,
+    "expected_offset": 0,
+    "expected_format": "uint32_le",
+    "raw_hex": "<large: 200 bytes>"
+  },
+  {
+    "name": "4B_Length_Head_LE",
+    "flow_id": 5,
+    "body_len": 1024,
+    "packet_len": 1082,
+    "expected_offset": 0,
+    "expected_format": "uint32_le",
+    "raw_hex": "<large: 1024 bytes>"
+  },
+  {
+    "name": "4B_Length_Head_LE",
+    "flow_id": 5,
+    "body_len": 2048,
+    "packet_len": 2106,
+    "expected_offset": 0,
+    "expected_format": "uint32_le",
+    "raw_hex": "<large: 2048 bytes>"
+  },
+  {
+    "name": "2B_Length_Mid_BE",
+    "flow_id": 10,
+    "body_len": 7,
+    "packet_len": 65,
+    "expected_offset": 2,
+    "expected_format": "uint16_be",
+    "raw_hex": "000000000000000755555555555555"
+  },
+  {
+    "name": "2B_Length_Mid_BE",
+    "flow_id": 10,
+    "body_len": 15,
+    "packet_len": 73,
+    "expected_offset": 2,
+    "expected_format": "uint16_be",
+    "raw_hex": "000000000000000f565656565656565656565656565656"
+  },
+  {
+    "name": "2B_Length_Mid_BE",
+    "flow_id": 10,
+    "body_len": 30,
+    "packet_len": 88,
+    "expected_offset": 2,
+    "expected_format": "uint16_be",
+    "raw_hex": "000000000000001e575757575757575757575757575757575757575757575757575757575757"
+  },
+  {
+    "name": "2B_Length_Mid_BE",
+    "flow_id": 10,
+    "body_len": 100,
+    "packet_len": 158,
+    "expected_offset": 2,
+    "expected_format": "uint16_be",
+    "raw_hex": "<large: 100 bytes>"
+  },
+  {
+    "name": "2B_Length_Mid_LE",
+    "flow_id": 11,
+    "body_len": 9,
+    "packet_len": 67,
+    "expected_offset": 2,
+    "expected_format": "uint16_le",
+    "raw_hex": "0000000000000900595959595959595959"
+  },
+  {
+    "name": "2B_Length_Mid_LE",
+    "flow_id": 11,
+    "body_len": 20,
+    "packet_len": 78,
+    "expected_offset": 2,
+    "expected_format": "uint16_le",
+    "raw_hex": "00000000000014005a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+  },
+  {
+    "name": "2B_Length_Mid_LE",
+    "flow_id": 11,
+    "body_len": 50,
+    "packet_len": 108,
+    "expected_offset": 2,
+    "expected_format": "uint16_le",
+    "raw_hex": "00000000000032004141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141"
+  },
+  {
+    "name": "2B_Length_Mid_LE",
+    "flow_id": 11,
+    "body_len": 80,
+    "packet_len": 138,
+    "expected_offset": 2,
+    "expected_format": "uint16_le",
+    "raw_hex": "00000000000050004242424242424242424242424242424242424242424242424242424242424242424242424242424242424242424242424242424242424242424242424242424242424242424242424242424242424242"
+  },
+  {
+    "name": "4B_Length_Mid_BE",
+    "flow_id": 12,
+    "body_len": 10,
+    "packet_len": 70,
+    "expected_offset": 2,
+    "expected_format": "uint32_be",
+    "raw_hex": "000000000000000a43434343434343434343"
+  },
+  {
+    "name": "4B_Length_Mid_BE",
+    "flow_id": 12,
+    "body_len": 100,
+    "packet_len": 160,
+    "expected_offset": 2,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 100 bytes>"
+  },
+  {
+    "name": "4B_Length_Mid_BE",
+    "flow_id": 12,
+    "body_len": 500,
+    "packet_len": 560,
+    "expected_offset": 2,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 500 bytes>"
+  },
+  {
+    "name": "4B_Length_Mid_BE",
+    "flow_id": 12,
+    "body_len": 2000,
+    "packet_len": 2060,
+    "expected_offset": 2,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 2000 bytes>"
+  },
+  {
+    "name": "1B_Length_Mid",
+    "flow_id": 13,
+    "body_len": 5,
+    "packet_len": 63,
+    "expected_offset": 3,
+    "expected_format": "uint8",
+    "raw_hex": "00000000000000054747474747"
+  },
+  {
+    "name": "1B_Length_Mid",
+    "flow_id": 13,
+    "body_len": 12,
+    "packet_len": 70,
+    "expected_offset": 3,
+    "expected_format": "uint8",
+    "raw_hex": "000000000000000c484848484848484848484848"
+  },
+  {
+    "name": "1B_Length_Mid",
+    "flow_id": 13,
+    "body_len": 20,
+    "packet_len": 78,
+    "expected_offset": 3,
+    "expected_format": "uint8",
+    "raw_hex": "00000000000000144949494949494949494949494949494949494949"
+  },
+  {
+    "name": "1B_Length_Mid",
+    "flow_id": 13,
+    "body_len": 50,
+    "packet_len": 108,
+    "expected_offset": 3,
+    "expected_format": "uint8",
+    "raw_hex": "00000000000000324a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a"
+  },
+  {
+    "name": "2B_Length_End_BE",
+    "flow_id": 20,
+    "body_len": 10,
+    "packet_len": 66,
+    "expected_offset": 4,
+    "expected_format": "uint16_be",
+    "raw_hex": "200000000000000a4b4b4b4b4b4b4b4b4b4b"
+  },
+  {
+    "name": "2B_Length_End_BE",
+    "flow_id": 20,
+    "body_len": 25,
+    "packet_len": 81,
+    "expected_offset": 4,
+    "expected_format": "uint16_be",
+    "raw_hex": "20000000000000194c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c"
+  },
+  {
+    "name": "2B_Length_End_BE",
+    "flow_id": 20,
+    "body_len": 60,
+    "packet_len": 116,
+    "expected_offset": 4,
+    "expected_format": "uint16_be",
+    "raw_hex": "200000000000003c4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d"
+  },
+  {
+    "name": "2B_Length_End_BE",
+    "flow_id": 20,
+    "body_len": 120,
+    "packet_len": 176,
+    "expected_offset": 4,
+    "expected_format": "uint16_be",
+    "raw_hex": "<large: 120 bytes>"
+  },
+  {
+    "name": "2B_Length_End_LE",
+    "flow_id": 21,
+    "body_len": 8,
+    "packet_len": 64,
+    "expected_offset": 4,
+    "expected_format": "uint16_le",
+    "raw_hex": "20000000000008004f4f4f4f4f4f4f4f"
+  },
+  {
+    "name": "2B_Length_End_LE",
+    "flow_id": 21,
+    "body_len": 40,
+    "packet_len": 96,
+    "expected_offset": 4,
+    "expected_format": "uint16_le",
+    "raw_hex": "200000000000280050505050505050505050505050505050505050505050505050505050505050505050505050505050"
+  },
+  {
+    "name": "2B_Length_End_LE",
+    "flow_id": 21,
+    "body_len": 80,
+    "packet_len": 136,
+    "expected_offset": 4,
+    "expected_format": "uint16_le",
+    "raw_hex": "20000000000050005151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151"
+  },
+  {
+    "name": "2B_Length_End_LE",
+    "flow_id": 21,
+    "body_len": 160,
+    "packet_len": 216,
+    "expected_offset": 4,
+    "expected_format": "uint16_le",
+    "raw_hex": "<large: 160 bytes>"
+  },
+  {
+    "name": "4B_Length_End_BE",
+    "flow_id": 22,
+    "body_len": 20,
+    "packet_len": 78,
+    "expected_offset": 4,
+    "expected_format": "uint32_be",
+    "raw_hex": "00000000000000145353535353535353535353535353535353535353"
+  },
+  {
+    "name": "4B_Length_End_BE",
+    "flow_id": 22,
+    "body_len": 200,
+    "packet_len": 258,
+    "expected_offset": 4,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 200 bytes>"
+  },
+  {
+    "name": "4B_Length_End_BE",
+    "flow_id": 22,
+    "body_len": 1000,
+    "packet_len": 1058,
+    "expected_offset": 4,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 1000 bytes>"
+  },
+  {
+    "name": "4B_Length_End_BE",
+    "flow_id": 22,
+    "body_len": 5000,
+    "packet_len": 5058,
+    "expected_offset": 4,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 5000 bytes>"
+  },
+  {
+    "name": "Varint_Head",
+    "flow_id": 30,
+    "body_len": 5,
+    "packet_len": 60,
+    "expected_offset": 0,
+    "expected_format": "varint",
+    "raw_hex": "18200000000000055757575757"
+  },
+  {
+    "name": "Varint_Head",
+    "flow_id": 30,
+    "body_len": 50,
+    "packet_len": 105,
+    "expected_offset": 0,
+    "expected_format": "varint",
+    "raw_hex": "18200000000000325858585858585858585858585858585858585858585858585858585858585858585858585858585858585858585858585858"
+  },
+  {
+    "name": "Varint_Head",
+    "flow_id": 30,
+    "body_len": 200,
+    "packet_len": 256,
+    "expected_offset": 0,
+    "expected_format": "varint",
+    "raw_hex": "<large: 200 bytes>"
+  },
+  {
+    "name": "Varint_Head",
+    "flow_id": 30,
+    "body_len": 1000,
+    "packet_len": 1056,
+    "expected_offset": 0,
+    "expected_format": "varint",
+    "raw_hex": "<large: 1000 bytes>"
+  },
+  {
+    "name": "Varint_Mid",
+    "flow_id": 31,
+    "body_len": 10,
+    "packet_len": 67,
+    "expected_offset": 2,
+    "expected_format": "varint",
+    "raw_hex": "000000000000000a41414141414141414141"
+  },
+  {
+    "name": "Varint_Mid",
+    "flow_id": 31,
+    "body_len": 100,
+    "packet_len": 157,
+    "expected_offset": 2,
+    "expected_format": "varint",
+    "raw_hex": "<large: 100 bytes>"
+  },
+  {
+    "name": "Varint_Mid",
+    "flow_id": 31,
+    "body_len": 500,
+    "packet_len": 558,
+    "expected_offset": 2,
+    "expected_format": "varint",
+    "raw_hex": "<large: 500 bytes>"
+  },
+  {
+    "name": "Varint_Mid",
+    "flow_id": 31,
+    "body_len": 2000,
+    "packet_len": 2058,
+    "expected_offset": 2,
+    "expected_format": "varint",
+    "raw_hex": "<large: 2000 bytes>"
+  },
+  {
+    "name": "ULEB128_Head",
+    "flow_id": 32,
+    "body_len": 8,
+    "packet_len": 63,
+    "expected_offset": 0,
+    "expected_format": "uleb128",
+    "raw_hex": "18200000000000084545454545454545"
+  },
+  {
+    "name": "ULEB128_Head",
+    "flow_id": 32,
+    "body_len": 80,
+    "packet_len": 135,
+    "expected_offset": 0,
+    "expected_format": "uleb128",
+    "raw_hex": "18200000000000504646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646"
+  },
+  {
+    "name": "ULEB128_Head",
+    "flow_id": 32,
+    "body_len": 300,
+    "packet_len": 356,
+    "expected_offset": 0,
+    "expected_format": "uleb128",
+    "raw_hex": "<large: 300 bytes>"
+  },
+  {
+    "name": "ULEB128_Head",
+    "flow_id": 32,
+    "body_len": 1500,
+    "packet_len": 1556,
+    "expected_offset": 0,
+    "expected_format": "uleb128",
+    "raw_hex": "<large: 1500 bytes>"
+  },
+  {
+    "name": "Magic_2B_Len",
+    "flow_id": 40,
+    "body_len": 12,
+    "packet_len": 68,
+    "expected_offset": 4,
+    "expected_format": "uint16_be",
+    "raw_hex": "200000000000000c494949494949494949494949"
+  },
+  {
+    "name": "Magic_2B_Len",
+    "flow_id": 40,
+    "body_len": 50,
+    "packet_len": 106,
+    "expected_offset": 4,
+    "expected_format": "uint16_be",
+    "raw_hex": "20000000000000324a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a"
+  },
+  {
+    "name": "Magic_2B_Len",
+    "flow_id": 40,
+    "body_len": 100,
+    "packet_len": 156,
+    "expected_offset": 4,
+    "expected_format": "uint16_be",
+    "raw_hex": "<large: 100 bytes>"
+  },
+  {
+    "name": "Magic_2B_Len",
+    "flow_id": 40,
+    "body_len": 200,
+    "packet_len": 256,
+    "expected_offset": 4,
+    "expected_format": "uint16_be",
+    "raw_hex": "<large: 200 bytes>"
+  },
+  {
+    "name": "Magic_4B_Len",
+    "flow_id": 41,
+    "body_len": 15,
+    "packet_len": 73,
+    "expected_offset": 4,
+    "expected_format": "uint32_be",
+    "raw_hex": "000000000000000f4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d"
+  },
+  {
+    "name": "Magic_4B_Len",
+    "flow_id": 41,
+    "body_len": 200,
+    "packet_len": 258,
+    "expected_offset": 4,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 200 bytes>"
+  },
+  {
+    "name": "Magic_4B_Len",
+    "flow_id": 41,
+    "body_len": 1000,
+    "packet_len": 1058,
+    "expected_offset": 4,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 1000 bytes>"
+  },
+  {
+    "name": "Magic_4B_Len",
+    "flow_id": 41,
+    "body_len": 5000,
+    "packet_len": 5058,
+    "expected_offset": 4,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 5000 bytes>"
+  },
+  {
+    "name": "Magic_Varint",
+    "flow_id": 42,
+    "body_len": 10,
+    "packet_len": 65,
+    "expected_offset": 4,
+    "expected_format": "varint",
+    "raw_hex": "182000000000000a51515151515151515151"
+  },
+  {
+    "name": "Magic_Varint",
+    "flow_id": 42,
+    "body_len": 80,
+    "packet_len": 135,
+    "expected_offset": 4,
+    "expected_format": "varint",
+    "raw_hex": "18200000000000505252525252525252525252525252525252525252525252525252525252525252525252525252525252525252525252525252525252525252525252525252525252525252525252525252525252525252"
+  },
+  {
+    "name": "Magic_Varint",
+    "flow_id": 42,
+    "body_len": 500,
+    "packet_len": 556,
+    "expected_offset": 4,
+    "expected_format": "varint",
+    "raw_hex": "<large: 500 bytes>"
+  },
+  {
+    "name": "Magic_Varint",
+    "flow_id": 42,
+    "body_len": 2000,
+    "packet_len": 2056,
+    "expected_offset": 4,
+    "expected_format": "varint",
+    "raw_hex": "<large: 2000 bytes>"
+  },
+  {
+    "name": "Boundary_0xFF",
+    "flow_id": 50,
+    "body_len": 100,
+    "packet_len": 155,
+    "expected_offset": 0,
+    "expected_format": "uint8",
+    "raw_hex": "<large: 100 bytes>"
+  },
+  {
+    "name": "Boundary_0xFF",
+    "flow_id": 50,
+    "body_len": 200,
+    "packet_len": 255,
+    "expected_offset": 0,
+    "expected_format": "uint8",
+    "raw_hex": "<large: 200 bytes>"
+  },
+  {
+    "name": "Boundary_0xFF",
+    "flow_id": 50,
+    "body_len": 250,
+    "packet_len": 305,
+    "expected_offset": 0,
+    "expected_format": "uint8",
+    "raw_hex": "<large: 250 bytes>"
+  },
+  {
+    "name": "Boundary_0xFF",
+    "flow_id": 50,
+    "body_len": 255,
+    "packet_len": 310,
+    "expected_offset": 0,
+    "expected_format": "uint8",
+    "raw_hex": "<large: 255 bytes>"
+  },
+  {
+    "name": "Boundary_0x100",
+    "flow_id": 51,
+    "body_len": 254,
+    "packet_len": 310,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "<large: 254 bytes>"
+  },
+  {
+    "name": "Boundary_0x100",
+    "flow_id": 51,
+    "body_len": 255,
+    "packet_len": 311,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "<large: 255 bytes>"
+  },
+  {
+    "name": "Boundary_0x100",
+    "flow_id": 51,
+    "body_len": 256,
+    "packet_len": 312,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "<large: 256 bytes>"
+  },
+  {
+    "name": "Boundary_0x100",
+    "flow_id": 51,
+    "body_len": 257,
+    "packet_len": 313,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "<large: 257 bytes>"
+  },
+  {
+    "name": "Boundary_0xFFFF",
+    "flow_id": 52,
+    "body_len": 65000,
+    "packet_len": 65058,
+    "expected_offset": 0,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 65000 bytes>"
+  },
+  {
+    "name": "Boundary_0xFFFF",
+    "flow_id": 52,
+    "body_len": 65000,
+    "packet_len": 65058,
+    "expected_offset": 0,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 65000 bytes>"
+  },
+  {
+    "name": "Boundary_0xFFFF",
+    "flow_id": 52,
+    "body_len": 65000,
+    "packet_len": 65058,
+    "expected_offset": 0,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 65000 bytes>"
+  },
+  {
+    "name": "Boundary_0xFFFF",
+    "flow_id": 52,
+    "body_len": 65000,
+    "packet_len": 65058,
+    "expected_offset": 0,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 65000 bytes>"
+  },
+  {
+    "name": "Mixed_Lengths",
+    "flow_id": 60,
+    "body_len": 1,
+    "packet_len": 57,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "200000000000000141"
+  },
+  {
+    "name": "Mixed_Lengths",
+    "flow_id": 60,
+    "body_len": 10,
+    "packet_len": 66,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "200000000000000a42424242424242424242"
+  },
+  {
+    "name": "Mixed_Lengths",
+    "flow_id": 60,
+    "body_len": 100,
+    "packet_len": 156,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "<large: 100 bytes>"
+  },
+  {
+    "name": "Mixed_Lengths",
+    "flow_id": 60,
+    "body_len": 1000,
+    "packet_len": 1056,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "<large: 1000 bytes>"
+  },
+  {
+    "name": "Mixed_Lengths",
+    "flow_id": 60,
+    "body_len": 5000,
+    "packet_len": 5056,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "<large: 5000 bytes>"
+  },
+  {
+    "name": "Same_Length_Repeat",
+    "flow_id": 70,
+    "body_len": 20,
+    "packet_len": 76,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "20000000000000145858585858585858585858585858585858585858"
+  },
+  {
+    "name": "Same_Length_Repeat",
+    "flow_id": 70,
+    "body_len": 20,
+    "packet_len": 76,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "20000000000000145858585858585858585858585858585858585858"
+  },
+  {
+    "name": "Same_Length_Repeat",
+    "flow_id": 70,
+    "body_len": 20,
+    "packet_len": 76,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "20000000000000145858585858585858585858585858585858585858"
+  },
+  {
+    "name": "Same_Length_Repeat",
+    "flow_id": 70,
+    "body_len": 20,
+    "packet_len": 76,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "20000000000000145858585858585858585858585858585858585858"
+  },
+  {
+    "name": "Same_Length_Repeat",
+    "flow_id": 70,
+    "body_len": 20,
+    "packet_len": 76,
+    "expected_offset": 0,
+    "expected_format": "uint16_be",
+    "raw_hex": "20000000000000145858585858585858585858585858585858585858"
+  },
+  {
+    "name": "Large_Data",
+    "flow_id": 80,
+    "body_len": 1000,
+    "packet_len": 1058,
+    "expected_offset": 0,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 1000 bytes>"
+  },
+  {
+    "name": "Large_Data",
+    "flow_id": 80,
+    "body_len": 5000,
+    "packet_len": 5058,
+    "expected_offset": 0,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 5000 bytes>"
+  },
+  {
+    "name": "Large_Data",
+    "flow_id": 80,
+    "body_len": 10000,
+    "packet_len": 10058,
+    "expected_offset": 0,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 10000 bytes>"
+  },
+  {
+    "name": "Large_Data",
+    "flow_id": 80,
+    "body_len": 20000,
+    "packet_len": 20058,
+    "expected_offset": 0,
+    "expected_format": "uint32_be",
+    "raw_hex": "<large: 20000 bytes>"
+  }
+]
