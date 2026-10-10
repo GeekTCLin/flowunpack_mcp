@@ -23,12 +23,21 @@ async def main() -> int:
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             init = await session.initialize()
-            info = init.server_info                      # mcp 2.x 的别名
+            # mcp 1.x 用 serverInfo（协议字段原名），mcp 2.x 提供 server_info 别名
+            info = getattr(init, "server_info", None) or init.serverInfo
             print("server:", info.name, info.version)
 
             tools = await session.list_tools()
             names = sorted(t.name for t in tools.tools)
             print("tools:", names)
+            # 工具清单断言：实现与注册必须一致（防止"有实现没注册"的缺口）
+            expected_tools = {"analyze_stream", "analyze_packets",
+                              "analyze_bidirectional", "infer_state_machine",
+                              "export_template", "decode_stream", "explain_spec",
+                              "hexdump", "list_formats", "service_info"}
+            assert set(names) == expected_tools, \
+                f"工具注册不一致: 多={set(names) - expected_tools} " \
+                f"少={expected_tools - set(names)}"
 
             # 构造一条 magic + uint16_be 长度前缀的流
             from flowunpack.synth import make_magic_length_stream

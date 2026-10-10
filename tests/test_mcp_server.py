@@ -141,4 +141,37 @@ class TestServerAssembly:
     def test_create_server_exposes_functions(self):
         srv = mcp_server.create_server()
         assert set(srv.fn) >= {"analyze_stream", "decode_stream", "service_info",
-                               "analyze_bidirectional"}
+                               "analyze_bidirectional", "infer_state_machine",
+                               "export_template"}
+
+
+class TestExportTemplateTool:
+    def test_export_aflnet(self):
+        data, _ = make_magic_length_stream()
+        out = mcp_server.tool_export_template("aflnet", data.hex())
+        assert out["ok"] is True
+        assert out["kind"] == "aflnet"
+        assert "def split_messages" in out["script"]
+
+    def test_export_boofuzz(self):
+        data, _ = make_magic_length_stream()
+        out = mcp_server.tool_export_template("boofuzz", data.hex())
+        assert out["ok"] is True
+        assert "s_size(\"payload\"" in out["script"]
+
+    def test_export_lua(self):
+        data, _ = make_magic_length_stream()
+        out = mcp_server.tool_export_template("lua", data.hex(),
+                                              proto_name="myproto")
+        assert out["ok"] is True
+        assert 'Proto("myproto"' in out["script"]
+
+    def test_unknown_kind(self):
+        data, _ = make_magic_length_stream()
+        out = mcp_server.tool_export_template("nope", data.hex())
+        assert out["ok"] is False
+        assert "boofuzz" in out["error"]
+
+    def test_rejects_random_stream(self):
+        out = mcp_server.tool_export_template("aflnet", random_stream(1024).hex())
+        assert out["ok"] is False

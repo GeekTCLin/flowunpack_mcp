@@ -37,6 +37,17 @@ def build_parser() -> argparse.ArgumentParser:
                    help="逐包模式：输入按行拆分为多个包")
     p.add_argument("--flow", type=int, default=None, help="pcap 中第 N 条流（默认第一条）")
     p.add_argument("--json", action="store_true", help="输出 JSON 而非文本报告")
+    p.add_argument("--export", choices=["boofuzz", "aflnet", "lua"],
+                   help="导出下游模板：boofuzz fuzzing 脚本 / AFLNet 消息切分脚本 / "
+                        "Wireshark Lua dissector（替代文本报告输出）")
+    p.add_argument("--out", dest="out", default=None,
+                   help="导出目标文件路径（缺省打印到 stdout）")
+    p.add_argument("--proto-name", dest="proto_name", default="inferred",
+                   help="导出 lua 时使用的协议名（默认 inferred）")
+    p.add_argument("--host", default="127.0.0.1",
+                   help="导出 boofuzz 时的目标主机（默认 127.0.0.1）")
+    p.add_argument("--port", type=int, default=9999,
+                   help="导出 boofuzz 时的目标端口（默认 9999）")
     p.add_argument("--max-offset", type=int, default=None)
     p.add_argument("--max-overhead", type=int, default=None)
     p.add_argument("--scan-start-offsets", action="store_true",
@@ -84,6 +95,25 @@ def main(argv: list | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - CLI 边界统一报错
         print(f"错误: {exc}", file=sys.stderr)
         return 2
+
+    if args.export:
+        if not result.detected or result.framing is None:
+            print("错误: 未检测到可靠的分帧结构，无法导出模板", file=sys.stderr)
+            return 1
+        from .exporters import export_template
+        try:
+            text = export_template(result, args.export,
+                                   proto_name=args.proto_name,
+                                   host=args.host, port=args.port)
+        except Exception as exc:  # noqa: BLE001 - CLI 边界统一报错
+            print(f"错误: {exc}", file=sys.stderr)
+            return 2
+        if args.out:
+            Path(args.out).write_text(text, encoding="utf-8")
+            print(f"已写入 {args.out}（{len(text)} 字符）")
+        else:
+            print(text, end="")
+        return 0
 
     if args.json:
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))

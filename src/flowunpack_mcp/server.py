@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -269,6 +270,53 @@ def tool_infer_state_machine(stream: str,
     return out
 
 
+def tool_export_template(kind: str, stream: str, encoding: str = "auto",
+                         proto_name: str = "inferred",
+                         host: str = "127.0.0.1", port: int = 9999
+                         ) -> Dict[str, Any]:
+    """把分析结果导出为下游可执行资产（boofuzz / AFLNet 切分脚本 / Lua dissector）。
+
+    产物是**独立脚本文本**（不依赖本库），写入文件即可使用。
+    无法表达的模板（如变长编码 vs 定宽 s_size）返回明确的错误说明，
+    不产出错误模板。
+    """
+    try:
+        data = coerce_bytes(stream, encoding=encoding)
+    except InputError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not data:
+        return {"ok": False, "error": "输入为空"}
+
+    cfg = _cfg_from()
+    result = analyze_stream(data, cfg)
+    if not result.detected or result.framing is None:
+        return {"ok": False, "detected": False,
+                "error": "未能确定分帧结构，无法导出模板",
+                "message": result.message}
+
+    from flowunpack.exporters import to_aflnet_splitter, to_boofuzz, \
+        to_lua_dissector
+    try:
+        if kind == "boofuzz":
+            text = to_boofuzz(result, host=host, port=port)
+        elif kind == "aflnet":
+            text = to_aflnet_splitter(result)
+        elif kind == "lua":
+            text = to_lua_dissector(result, proto_name=proto_name)
+        else:
+            return {"ok": False, "error":
+                    f"未知导出类型 {kind!r}，支持: boofuzz / aflnet / lua"}
+    except Exception as exc:                 # noqa: BLE001 - 工具层统一转错误
+        return {"ok": False, "detected": True,
+                "framing": result.framing.describe(),
+                "error": str(exc)}
+
+    return {"ok": True, "kind": kind,
+            "framing": result.framing.describe(),
+            "confidence": round(result.confidence, 4),
+            "script": text}
+
+
 def tool_decode_stream(stream: str,
                        offset: int,
                        format: str,
@@ -398,7 +446,11 @@ def tool_service_info() -> Dict[str, Any]:
 
 def create_server(name: str = SERVER_NAME) -> Any:
     """创建并注册好所有工具的 MCP 服务器实例。"""
-    server = _ServerImpl(name=name, instructions=_INSTRUCTIONS, version=__version__)
+    # mcp 1.x 的 FastMCP 在部分版本接受 version、在另一些版本已移除该参数；
+    # mcp 2.x 的 MCPServer 则一直接受。按构造函数实际签名自适应，兼容两代实现。
+    wanted: dict = {"name": name, "instructions": _INSTRUCTIONS, "version": __version__}
+    accepted = inspect.signature(_ServerImpl.__init__).parameters
+    server = _ServerImpl(**{k: v for k, v in wanted.items() if k in accepted})
 
     @server.tool(name="analyze_stream",
                  description="分析一条连续 TCP 流的二进制协议结构。识别分帧模板"
@@ -445,6 +497,34 @@ def create_server(name: str = SERVER_NAME) -> Any:
             c2s, s2c, encoding=encoding, max_offset=max_offset,
             max_overhead=max_overhead, verbose=verbose), ensure_ascii=False)
 
+    @server.tool(name="infer_state_machine",
+                 description="协议状态机推断：把消息序列按命令字符号化，"
+                             "PTA + k-Tail 状态合并推断确定自动机与状态环"
+                             "（握手→轮询循环这类阶段结构）。输出状态转移表、"
+                             "环列表与 k 敏感性（单条样本无法唯一确定 k）。"
+                             "消息无法符号化时明确拒绝并给出原因。")
+    def _infer_state_machine(stream: str, encoding: str = "auto",
+                             k: Optional[int] = None,
+                             max_offset: Optional[int] = None,
+                             verbose: bool = False) -> str:
+        return json.dumps(tool_infer_state_machine(
+            stream, encoding=encoding, k=k, max_offset=max_offset,
+            verbose=verbose), ensure_ascii=False)
+
+    @server.tool(name="export_template",
+                 description="把分析结果导出为下游可执行资产："
+                             "kind=boofuzz 生成协议 fuzzing 模板（s_size/s_checksum，"
+                             "仅长度前缀定宽编码）；kind=aflnet 生成消息切分脚本"
+                             "（AFLNet/ProFuzzBench 用，消除其唯一人工环节——消息边界"
+                             "识别，四种模板全支持）；kind=lua 生成 Wireshark dissector。"
+                             "返回脚本文本，写入文件即可使用。产物是推断结果，需人工核对。")
+    def _export_template(kind: str, stream: str, encoding: str = "auto",
+                         proto_name: str = "inferred",
+                         host: str = "127.0.0.1", port: int = 9999) -> str:
+        return json.dumps(tool_export_template(
+            kind, stream, encoding=encoding, proto_name=proto_name,
+            host=host, port=port), ensure_ascii=False)
+
     @server.tool(name="decode_stream",
                  description="用已确定的帧结构切分流（跳过检测）。"
                              "frame_len = scale*value + overhead，"
@@ -487,6 +567,7 @@ def create_server(name: str = SERVER_NAME) -> Any:
         "analyze_packets": tool_analyze_packets,
         "analyze_bidirectional": tool_analyze_bidirectional,
         "infer_state_machine": tool_infer_state_machine,
+        "export_template": tool_export_template,
         "decode_stream": tool_decode_stream,
         "explain_spec": tool_explain_spec,
         "hexdump": tool_hexdump,

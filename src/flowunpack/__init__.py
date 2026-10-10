@@ -37,6 +37,11 @@ from .detectors import (
     detect_templates,
 )
 from .engine import analyze, analyze_packets, analyze_stream, resolve_spec
+from .exporters import (
+    SUPPORTED_KINDS as EXPORT_KINDS,
+    UnsupportedTemplateError,
+    export_template,
+)
 from .fields import (
     detect_trailer_checksum,
     field_boundaries,
@@ -92,6 +97,8 @@ __all__ = [
     "analyze_bidirectional", "BidirectionalResult", "Coupling",
     # 状态机推断（P2-10）
     "infer_state_machine", "StateMachine", "ktail_states",
+    # 导出器（P3-11/12：boofuzz / AFLNet / Lua dissector）
+    "export_template", "EXPORT_KINDS", "UnsupportedTemplateError",
     # 输出
     "render_report",
 ]

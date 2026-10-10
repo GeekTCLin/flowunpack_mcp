@@ -637,3 +637,77 @@ n 个样本的单列熵上限是 `log2(min(n,256))`。用固定的 6.5 bits 当"
 * **消息类型聚类只看了包头区**，且要求 keyword 取值重复。若真实协议的命令字
   位于变长区或与 session-id 混在一起，当前实现会漏。
 
+
+---
+
+## 十一、第六轮调研（2026-10 开源前）：LLM 时代的协议逆向与下游应用
+
+开源前的最后一轮调研，聚焦 2024-2026 年的新工作：LLM 参与的协议逆向、
+状态机推断新方法、以及"格式推断成果被下游利用"的方式。结论先行：
+**纯轨迹驱动 + 显著性检验压误报这条路线在当前文献里依然稀缺，是本项目的差异化卖点**；
+最大的可借鉴点来自下游（fuzzing 对消息边界自动化的刚需）与分层架构（确定性结构 + LLM 语义）。
+
+### 11.1 LLM 用于协议逆向：分层借鉴，不要让 LLM 碰结构
+
+| 工作 | 来源 | 有代码 | 机制 | 可借鉴点 |
+|---|---|---|---|---|
+| ChatAFL | NDSS'24 | ✅ [ChatAFLndss/ChatAFL](https://github.com/ChatAFLndss/ChatAFL) | LLM 为每类报文构建语法并预测消息序列，接入 AFLNet | 把 flowunpack 的分帧 + 字段标注作为**确定性骨架**，LLM 只做语义命名与消息类型扩写——结构推断绝不交给 LLM（幻觉会破坏帧边界） |
+| protodissect | GitHub, BSD-3 | ✅ [dilates/protodissect](https://github.com/dilates/protodissect) | 确定性 PRE，从 PCAP 直接生成 Wireshark dissector，可选本地 LLM 命名字段 | 加一个 **"模板 → Lua dissector 导出"** 工具作为下游验证闭环：能被 Wireshark 加载且解析成功的模板就是可用的模板 |
+| Moosa-Salehi PRE 管道 | GitHub | ✅ [Moosa-Salehi/protocol_reverse_engineering](https://github.com/Moosa-Salehi/protocol_reverse_engineering) | PCAP→规范化→聚类→分帧/字段/关系→HTML 报告 | "结构推断（确定性）+ 语义（LLM）"分层与报告化输出；我们的差异化在零依赖与置换检验 |
+| ProtocolGPT | arXiv 2405.00393 | ✗ | RAG + 提示工程从协议实现源码推断状态机 | 源码路线，与流量路线互补，不适用本项目 |
+| ICProFuzz | IEEE 2024 | ✗ | LLM 理解私有工控协议后做格式保持变异 | 印证"结构必须先确定、变异才格式保持"的分工 |
+
+### 11.2 状态机推断：规范文档路线兴起，反向借用作交叉证伪
+
+FlowFSM（arXiv 2507.11222）、SpecGPT（arXiv 2510.14348）、RAG-ReAct FSM 评测
+（arXiv 2502.15727）均仅论文，共同趋势是 2024 后从"轨迹→FSM"转向
+"RFC/3GPP 规范文档→FSM"。对本项目的启发：
+
+- 本项目 `statemachine.py` 的 k-Tail 输出可以让 LLM 对照猜测的 RFC 做**交叉证伪**
+  ——这是与"双向流耦合"同级的第三类硬证据来源（规范里写了状态机，观测序列若与
+  高置信规范矛盾，说明符号化或分帧有误）。
+- 纯轨迹驱动 + 置换检验压误报在当前文献里仍是稀缺组合，README 应把这一点写足。
+
+### 11.3 下游应用：fuzzing 是格式推断成果的最大消费方
+
+**最重要的发现**：AFLNet Five Years Later（IEEE TSE 2025，arXiv 2412.20324）复盘指出，
+AFLNet 唯一强制的人工输入就是**消息边界识别**。这正好是 flowunpack 的核心输出。
+
+可落地的下游桥接（建议作为路线图新条目）：
+
+1. **AFLNet / ProFuzzBench 边界脚本生成**：把 `frames[]` 输出转成 AFLNet 的
+   消息边界描述，消除其唯一人工环节——这是最有说服力的应用叙事。
+2. **boofuzz 模板映射**：`frame_len = scale·value + overhead` 直接映射为 boofuzz 的
+   `size` block 定义；CRC32 反算字段输出为"需重算区"提示。
+3. **ProtoForge**（Python，2026-08 活跃，✅ 有代码）：当前定位最接近的项目
+   （录流量→推断分帧/字段/校验和→活体回放验证→确定性 fuzz）。其"活体验证"环节
+   是本项目（纯离线）可补的差异点——不联网也能做"回放一致性"校验。
+
+### 11.4 结构感知的加密流量分析：一个可复用的先验
+
+Language of Network（arXiv 2505.19482）、Pcap-Encoder（arXiv 2507.16438）、
+Lens（arXiv 2402.03646）均为表征学习路线，与规则式推断距离较远。唯一可落地的是
+**"报头/加密区分离"先验**：给高熵字段打"加密/随机区"标签，并与 CRC/长度假设做
+互斥验证（一个字段若被判定为随机数，就不应同时被解释为长度字段）。
+
+### 11.5 竞品格局小结
+
+Netzob/BinaryInferno 之后无老牌工具复兴；2024 后同定位新项目（protodissect、
+ProtoForge、Moosa-Salehi 管道、CNNPRE）均走"确定性推断 + 可选 LLM 命名"路线且体量小。
+本项目的四模板分帧 + 全样本成立的字段约束 + 两级置换检验仍是差异化点；
+短板是**没有真实 pcap 语料上的第三方评测**（§6 的 ground-truth 基准仍是 P0）。
+
+### 11.6 落地注记（2026-10 开源整理期间）
+
+本节调研的 11.3（fuzzing 桥接）、11.1 的 dissector 导出、11.5 的评测短板
+已在开源前落地：
+
+| 项 | 落点 | 说明 |
+|---|---|---|
+| P3-11 fuzzing 桥接 | `src/flowunpack/exporters/boofuzz.py`、`aflnet.py` | boofuzz：`s_size` + `math` 回调表达 `frame_len = scale*value + overhead`，CRC32 trailer 转 `s_checksum`；变长编码/非长度前缀显式拒绝（不产出错误模板）。AFLNet：独立零依赖切分脚本，四种模板全支持，varint 内联 LEB128 |
+| P3-12 dissector 导出 | `src/flowunpack/exporters/lua.py` | 四种模板全支持（varint 除外）；`FieldSpec.kind` → `ProtoField` 映射；负 offset trailer 按帧尾解析；`bind_port` 可直接绑定端口。已用 tshark 实际加载 + text2pcap 构造流量验证析出全部帧 |
+| 真实协议基准 | `bench/benchmark_real.py` + `bench/data/` | tshark PDML 原子字段边界作金标准（容器字段/位域剔除），P/R/F1 + FMS；样本取 Wireshark 官方测试抓包随仓库分发。**首次基线暴露：字段推断在真实数据上过度合并（mDNS Recall 0.125 / Precision 1.000），与 §10 的字段边界分辨率上限一致**；git pkt-line 确认为模板缺口（总长 ASCII 长度且无终止符） |
+
+实施中发现的一个额外缺口：`infer_state_machine` 此前**有实现但未注册**为
+MCP 工具（README 却已记载）——已补注册，并给 `smoke_mcp_stdio.py` 加了
+工具清单断言防止复发。

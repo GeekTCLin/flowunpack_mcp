@@ -1,15 +1,15 @@
 # flowunpack
 
-**TCP 流二进制协议结构启发式检测库 —— 拆包、自动分帧、字段级语义标注，可作为 MCP 服务供 Wireshark MCP 调用。**
+**TCP 流二进制协议结构启发式检测库 —— 拆包、自动分帧、字段级语义标注、协议状态机推断，可作为 MCP 服务供 LLM 客户端调用。**
 
 | | |
 |---|---|
 | 版本 | `1.0.0` |
-| 许可 | MIT |
-| 依赖 | 核心库**零第三方依赖**；Python ≥ 3.9（实测 3.13） |
-| 可选依赖 | `mcp`（MCP 服务）、`scapy`（读本地 pcap） |
-| 测试 | 210 项 pytest 用例通过（另 2 项 xfail 标记已知失败） |
-| 文档 | 算法路线与论文/开源参考见 [`docs/ALGORITHM_ROADMAP.md`](docs/ALGORITHM_ROADMAP.md) |
+| 许可 | MIT（[LICENSE](LICENSE)） |
+| 依赖 | 核心库**零第三方依赖**；Python ≥ 3.9（实测 3.10 / 3.13） |
+| 可选依赖 | `mcp`（MCP 服务，兼容 mcp 1.x / 2.x）、`scapy`（读本地 pcap） |
+| 测试 | 254 项 pytest 用例通过（3 项跳过；另 2 项 xfail 标记已知失败） |
+| 文档 | 算法路线与论文/开源参考见 [`docs/ALGORITHM_ROADMAP.md`](docs/ALGORITHM_ROADMAP.md)；贡献流程见 [`CONTRIBUTING.md`](CONTRIBUTING.md)；变更历史见 [`CHANGELOG.md`](CHANGELOG.md) |
 
 ---
 
@@ -85,12 +85,16 @@ Wireshark MCP --(单条流 hex/base64)--> flowunpack MCP --(帧结构 + 分帧�
 - **歧义显式暴露**：一条流同时自洽于多个模板时，给出胜出者并**并列**其余方案，
   不做无依据的取舍。
 - **零依赖核心库**：只有读本地 pcap 才需要 scapy；MCP 服务独立可选。
+- **导出下游可执行资产**：boofuzz fuzzing 模板（`s_size`/`s_checksum`）、
+  AFLNet/ProFuzzBench 消息切分脚本（消除协议 fuzzing 唯一强制人工输入——消息边界识别）、
+  Wireshark Lua dissector，命令行 / Python API / MCP 三种入口。
 
 ---
 
 ## 3. 安装
 
 ```bash
+git clone <仓库地址> && cd flowunpack   # 或发布后: pip install flowunpack
 pip install -e .            # 核心库（零依赖）
 pip install -e ".[mcp]"     # + MCP 服务
 pip install -e ".[pcap]"    # + 读本地 pcap（scapy）
@@ -129,21 +133,22 @@ print(render_report(result))
 
 ### 4.2 接进 MCP 客户端
 
-把 `mcp-config-example.json` 的内容并入客户端的 MCP 配置（如 `~/.workbuddy/mcp.json`），
-把 `<PYTHON>` 与 `<PROJECT>` 换成绝对路径：
+已 `pip install flowunpack[mcp]` 时，在客户端的 MCP 配置（如 `~/.workbuddy/mcp.json`、
+Claude Desktop 的 `claude_desktop_config.json` 等）里加入：
 
 ```json
 {
   "mcpServers": {
     "flowunpack": {
-      "command": "C:/path/to/python.exe",
-      "args": ["E:/opencode_workspace/unpacket/mcp_server.py"]
+      "command": "flowunpack-mcp",
+      "args": []
     }
   }
 }
 ```
 
-> 添加后需在连接管理页对新服务点「信任」才会真正启用。
+未安装包时，`command` 填 Python 绝对路径、`args` 填 `["<仓库路径>/mcp_server.py"]`
+（该入口会自动把 `src` 加入模块搜索路径）。完整示例见 [`mcp-config-example.json`](mcp-config-example.json)。
 
 ---
 
@@ -393,6 +398,7 @@ python mcp_server.py --transport sse
 | `analyze_packets` | 逐包模式：输入多个 TCP 包的 payload（hex 数组或多行 hex） |
 | `analyze_bidirectional` | **双向联合推断**：同时输入 c2s 与 s2c 两条流，交叉验证并互相解歧义 |
 | `infer_state_machine` | **状态机推断**：把消息序列按命令字符号化，PTA + k-Tail 推断 DFA 与状态环 |
+| `export_template` | **导出下游模板**：kind=boofuzz（fuzzing 脚本）/ aflnet（消息切分脚本）/ lua（Wireshark dissector） |
 | `decode_stream` | 用已确定的帧结构切分流，跳过检测（适合二次调用） |
 | `explain_spec` | 把帧结构翻译成人类可读说明 |
 | `hexdump` | 转储为 offset/hex/ascii，核对输入是否正确 |
@@ -493,6 +499,18 @@ else:
     print(result.statistics["state_machine_summary"])   # 为什么没推断
 ```
 
+导出下游模板（boofuzz fuzzing 脚本 / AFLNet 消息切分脚本 / Lua dissector）：
+
+```python
+from flowunpack import analyze_stream, export_template
+
+result = analyze_stream(data)
+lua_text = export_template(result, "lua", proto_name="myproto")       # Wireshark dissector
+splitter_text = export_template(result, "aflnet")                     # AFLNet/ProFuzzBench 切分脚本
+fuzz_text = export_template(result, "boofuzz", host="10.0.0.1", port=9999)
+# 无法表达的模板（如变长编码 vs 定宽 s_size）会抛 UnsupportedTemplateError
+```
+
 覆写阈值：
 
 ```python
@@ -520,6 +538,14 @@ sm_cfg = DEFAULT_CONFIG.overridden(sm_default_k=3, sm_min_symbols=16)
 python -m flowunpack --hex "0005 4845 4c4c 4f 0005 576f 726c 64"
 python -m flowunpack --file stream.bin --json
 python -m flowunpack --pcap capture.pcap --flow 0     # 需 scapy
+```
+
+导出下游模板（产物为独立脚本，`--out` 写文件、缺省打印）：
+
+```bash
+python -m flowunpack --file stream.bin --export boofuzz --out fuzz_proto.py
+python -m flowunpack --file stream.bin --export aflnet --out split_messages.py
+python -m flowunpack --file stream.bin --export lua --proto-name myproto --out dissector.lua
 ```
 
 ---
@@ -560,6 +586,41 @@ python bench/benchmark.py
 > 里（`test_variable_header_should_be_rejected` /
 > `test_bcd_length_should_be_rejected`），修好后会自动报 XPASS。
 > （**包头零填充**曾在此列，2026-09 已修复并转成正向断言 `test_zero_filled_header`。）
+
+### 9.1 真实协议字段推断基准
+
+`bench/benchmark_real.py` 用**真实抓包**评估字段级推断：金标准来自
+`tshark -T pdml` 的原子字段边界（Wireshark 官方测试抓包，样本在 `bench/data/`
+随仓库分发），指标为逐边界 Precision/Recall/F1 与 NEMESYS FMS(γ=2)。
+
+```bash
+python bench/benchmark_real.py        # 需要 tshark
+```
+
+**首次基线**（2026-10，诚实记录）：
+
+| 数据集 | 消息数 | Precision | Recall | F1 | FMS |
+|---|---|---|---|---|---|
+| mDNS 查询（定长 90B 文本载荷） | 126 | 1.000 | 0.125 | 0.222 | 0.081 |
+| DHCP（固定头 + 变长 options） | 4 | 0.500 | 0.034 | 0.063 | 0.027 |
+| DNS（非标准端口，最小样本） | 4 | 0.000 | 0.000 | 0.000 | 0.089 |
+| git pkt-line（**预期失败**用例） | 4 | 0.000 | 0.000 | 0.000 | 0.000 |
+
+**读这份数字时要注意**：
+
+- 真实协议的字段密度远高于合成流（DNS 头部 6 个 2 字节字段 + 变长域名），
+  Recall 低的主要原因是字段推断在真实数据上**过度合并**（边界候选存在但
+  DP 合成一个字段）——这与 README §11 的"字段边界分辨率上限"一致，
+  是后续 P1（PCA 细化、类型驱动分裂）要解决的问题。
+- Precision 仍保持高位（mDNS 1.000）——"几乎总是对的，宁可少报"的设计
+  在真实数据上同样成立。
+- git pkt-line 是**能力缺口**的真实样本：其 ASCII 长度计"含自身"的总长且
+  数据后无终止符，不属于当前 `<数字><term><数据><term>` 模板。
+- 4 条消息的数据集低于可靠推断的样本量（`field_min_units` 附近），数字仅作
+  退化行为记录。
+
+> 合成基准（§9 上表）回答"分帧边界是否精确"，本基准回答"真实协议上字段
+> 边界有多准"；前者是回归门槛，后者是能力地图。
 
 ---
 
@@ -699,6 +760,10 @@ src/
 │   ├── fields.py            字段级推断：边界 + 语义类型 + 消息类型聚类
 │   ├── bidir.py             双向流联合推断：三条耦合证据 + 跨方向迁移裁决
 │   ├── statemachine.py      状态机推断：符号化 + PTA + k-Tail 合并 + 环检测
+│   ├── exporters/           导出器（产物为独立脚本，不依赖本库）
+│   │   ├── boofuzz.py       boofuzz fuzzing 模板（s_size / s_checksum，仅长度前缀定宽编码）
+│   │   ├── aflnet.py        AFLNet/ProFuzzBench 消息切分脚本（四种模板全支持）
+│   │   └── lua.py           Wireshark Lua dissector（四种模板全支持，varint 除外）
 │   ├── analyzers/
 │   │   ├── length_field.py  逐包模式长度字段检测与评分
 │   │   └── structure.py     固定字节 / 魔数 / 熵值 / 包头模板
@@ -707,9 +772,11 @@ src/
 │   ├── pcap.py              可选：读 pcap（惰性 import scapy）
 │   └── synth.py             合成测试数据（可指定高熵/低熵载荷、四种模板）
 ├── flowunpack_mcp/          MCP 服务实现
-├── tests/                   pytest 用例（210 项通过，另 2 项 xfail 标记已知失败）
+├── tests/                   pytest 用例（274 项通过，另 2 项 xfail 标记已知失败）
 ├── bench/                   评估与剖析脚本
 │   ├── benchmark.py         金标准帧边界 → P/R/F1/FMS/FPR（覆盖四种模板）
+│   ├── benchmark_real.py    真实协议字段推断基准（tshark PDML 金标准，需 tshark）
+│   ├── data/                真实协议样本抓包（Wireshark 官方测试抓包，<100KB 随仓库分发）
 │   ├── calibrate.py         正负样本上的置换统计量标定
 │   ├── calibrate_staged.py  分阶段搜索短路阈值（min_matched_gap）的标定
 │   ├── diag_scale.py        scale 假设为何被伪解压过
@@ -726,8 +793,10 @@ src/
 ├── examples/demo.py         端到端演示
 └── docs/
     ├── ALGORITHM_ROADMAP.md 算法改进路线与学术/开源参考
-    └── REFACTOR_NOTES.md    legacy → flowunpack 的重构说明
-legacy/                      旧脚本（已归档，不参与构建，仅作参考）
+    └── REFACTOR_NOTES.md    重构与开发过程记录
+
+.github/workflows/ci.yml     CI（3.9 / 3.11 / 3.13 矩阵：单测 + 基准 + 诊断 + MCP 端到端）
+mcp_server.py                MCP 服务启动入口（免安装直跑）
 ```
 
 ---
@@ -735,18 +804,21 @@ legacy/                      旧脚本（已归档，不参与构建，仅作参
 ## 13. 开发与测试
 
 ```bash
-python -m pytest tests -q              # 209 项（2 项 xfail = 已知失败，见 README §11）
+python -m pytest tests -q              # 280 项通过（2 项 xfail = 已知失败，见 README §11）
 python -m pytest tests -q -rxX         # 打印 xfail 原因
-python tests/smoke_mcp_stdio.py        # 真实启动 MCP 进程做端到端验证
+python tests/smoke_mcp_stdio.py        # 真实启动 MCP 进程做端到端验证（含工具清单断言）
 python bench/benchmark.py              # 分帧准确率基准（四模板 P/R/F1/FMS + 误报率）
+python bench/benchmark_real.py         # 真实协议字段推断基准（需 tshark，基线见 §9.1）
 python bench/diag_fields.py            # 字段边界 / 语义类型 / 消息分簇诊断
 python bench/diag_templates.py         # 四种模板的集成裁决行为诊断
 python bench/diag_bidir.py             # 双向耦合三条证据的开关 + 冲突裁决诊断
+python bench/diag_statemachine.py      # 状态机诊断
 python bench/check_mcp_templates.py    # MCP 工具层 + 报告渲染的模板覆盖校验
 python bench/calibrate.py              # 置换统计量在正负样本上的标定
 ```
 
-改动算法后，上述五项应全部通过且基准指标不回退。
+改动算法后，上述检查应全部通过且基准指标不回退（提交前清单见 [`CONTRIBUTING.md`](CONTRIBUTING.md)）。
+CI 在 Python 3.9 / 3.11 / 3.13 上跑同一套检查（`.github/workflows/ci.yml`）。
 
 ## 14. 路线图
 
@@ -764,6 +836,17 @@ P0-3（金标准基准）、P1（字段级语义标注 + 消息类型聚类）�
 
 另有两项延后：评分改为因子图后验概率（需先有标注数据集）、
 真实 pcap 语料上的 FPR 评测（需先有语料）。
+
+**P3 —— 开源后的候选方向**（依据 2026-10 的第六轮调研，
+`docs/ALGORITHM_ROADMAP.md` 第十一节）：
+
+| # | 方向 | 状态与要点 |
+|---|---|---|
+| 11 | **fuzzing 桥接** | ✅ 已完成。`exporters/boofuzz.py`（`s_size` + `s_checksum`，仅长度前缀定宽编码，变长编码显式拒绝）+ `exporters/aflnet.py`（独立消息切分脚本，四种模板全支持）。见 §8。 |
+| 12 | **Wireshark dissector 导出** | ✅ 已完成。`exporters/lua.py`：四种模板全支持（varint 除外），字段语义 → `ProtoField` 映射，trailer 按帧尾对齐；已用 tshark 实际加载并析出全部帧验证。见 §8。 |
+| 13 | **真实协议金标准基准** | ✅ 首轮完成。`bench/benchmark_real.py` + `bench/data/` 样本（Wireshark 官方抓包），基线见 §9.1；后续扩协议语料并随字段推断改进重跑。 |
+| 14 | **高熵字段标签** | 未做。给随机/加密区打显式标签，并与长度/CRC 假设做互斥验证（`fields.py` 已有 `random` kind，属于字段推断小修）。 |
+| 15 | **LLM 交叉证伪** | 未做。让 LLM 对照猜测的 RFC 证伪 k-Tail 状态机（规范文档路线的反向借鉴）；属编排层，给出示例/文档即可，不做成库内功能。 |
 
 包头零填充导致的超量伪解（30 伪帧 vs 10 真帧）已于 2026-09-21 修复。根因是走查
 缺少"帧长必须容纳整个帧头"这条必要条件 —— 在 `frame_len = scale*value + overhead`
@@ -786,6 +869,10 @@ P0-3（金标准基准）、P1（字段级语义标注 + 消息类型聚类）�
 | [nemesys](https://github.com/vs-uulm/nemesys) | 单消息内在结构、bit 级边界、FMS 指标、PCA 细化边界 |
 | [fieldhunter](https://github.com/vs-uulm/fieldhunter) | 语义类型推断（长度/校验和/主机名/命令字） |
 | BinaryInferno (NDSS'23) | 探测器集成 + 熵变边界检测 + 序列化模式搜索 |
+| [ChatAFL](https://github.com/ChatAFLndss/ChatAFL) (NDSS'24) | LLM 引导的协议 fuzzing：本项目走"确定性结构 + LLM 语义"分层架构的直接参照 |
+| AFLNet Five Years Later (IEEE TSE 2025) | 复盘指出消息边界识别是 fuzzing 唯一强制人工输入 —— 本项目分帧输出的核心下游价值 |
+| [protodissect](https://github.com/dilates/protodissect) (BSD-3) | 确定性 PRE → Wireshark dissector 导出（P3-12 的路线参照） |
+| [ProtoForge](https://github.com/topics/protocol-reverse-engineering) (2026) | 定位最接近的新项目：推断 + 活体回放验证 + 确定性 fuzz |
 
 BinaryInferno 论文给出的 SOTA 对比（值得作为精度天花板的参照）：
 
@@ -797,14 +884,14 @@ BinaryInferno 论文给出的 SOTA 对比（值得作为精度天花板的参照
 | NEMESYS | 0.31 | 0.44 | 0.11 |
 | NetPlier | 0.29 | 0.75 | 0.22 |
 
-完整论文清单（含 Discoverer、NEMESYS、NEMETYL、NetPlier、DynPRE 等 12 篇）
-见 [`docs/ALGORITHM_ROADMAP.md`](docs/ALGORITHM_ROADMAP.md) 第五节。
+完整论文清单（含 Discoverer、NEMESYS、NEMETYL、NetPlier、DynPRE、ROSE/LOTUS、FLINT
+等 16 篇，以及 2024-2026 LLM 路线的新工作）见
+[`docs/ALGORITHM_ROADMAP.md`](docs/ALGORITHM_ROADMAP.md) 第五、十一节。
 
 ---
 
 ## 16. 许可
 
-MIT。详见 [`pyproject.toml`](pyproject.toml)。
+MIT，详见 [LICENSE](LICENSE)。
 
-`legacy/` 目录下的旧脚本仅作历史对照保留，不参与构建、不被测试覆盖、不再维护。
-重构改了什么见 [`docs/REFACTOR_NOTES.md`](docs/REFACTOR_NOTES.md)。
+重构与开发过程记录见 [`docs/REFACTOR_NOTES.md`](docs/REFACTOR_NOTES.md)。
