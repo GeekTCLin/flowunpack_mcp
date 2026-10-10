@@ -31,8 +31,9 @@ flowunpack_mcp         服务层：MCP 工具
 
 ## 三、遗留说明
 
-`legacy/` 目录仅作对照保留，不参与构建、不被测试覆盖、不再维护。
-需要旧行为时请自行移植，不要直接 import。
+开源整理时（2026-10）`legacy/` 目录已从工作树移除，内容保留在 git 历史中
+（需要旧行为时 `git log --diff-filter=D -- legacy/` 找到删除提交后 `git show` 提取）。
+不要在任何新代码里 import 旧脚本。
 
 ## 四、P2 开发记录
 

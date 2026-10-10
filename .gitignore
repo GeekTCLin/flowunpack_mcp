@@ -21,6 +21,8 @@ htmlcov/
 *.cap
 exported_flows/
 exports/
+# 例外：bench/data 的样本抓包很小（<100KB），随仓库分发以保证真实协议基准可复现
+!bench/data/*.pcap
 
 # ---- 本地调试产物 ----
 # bench/ 与诊断脚本把输出重定向到 _*.txt / _*.json，都是一次性调试产物。
@@ -43,8 +45,5 @@ desktop.ini
 .env
 .env.*
 
-# ---- WorkBuddy 工作区数据 ----
-# skills/ 是项目级可复用流程（一键回归清单），随仓库走；
-# memory/ 是逐日工作流水，属于个人记录，不入库。
-.workbuddy/*
-!.workbuddy/skills/
+# ---- WorkBuddy 工作区数据（本机工具配置，不入库） ----
+.workbuddy/

@@ -5,19 +5,38 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "flowunpack"
 dynamic = ["version"]
-description = "TCP 流二进制协议结构启发式检测（长度前缀识别 / 自动分帧），可作为 MCP 服务供 Wireshark MCP 调用"
+description = "TCP 流二进制协议结构启发式检测（长度前缀识别 / 自动分帧 / 字段语义标注 / 状态机推断），可作为 MCP 服务供 LLM 客户端调用"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 authors = [{ name = "flowunpack contributors" }]
-keywords = ["pcap", "wireshark", "tcp", "protocol", "reverse-engineering", "mcp", "unpack"]
+keywords = ["pcap", "wireshark", "tcp", "protocol", "reverse-engineering", "mcp", "unpack", "framing", "protocol-analysis"]
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Topic :: System :: Networking :: Monitoring",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet",
+    "Topic :: Security",
+    "Topic :: System :: Networking :: Monitoring",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = []
+
+# 开源发布前把占位 URL 换成实际远程仓库地址
+[project.urls]
+Homepage = "https://github.com/TODO-REPLACE-ME/flowunpack"
+Repository = "https://github.com/TODO-REPLACE-ME/flowunpack"
+Issues = "https://github.com/TODO-REPLACE-ME/flowunpack/issues"
+Changelog = "https://github.com/TODO-REPLACE-ME/flowunpack/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.0"]

@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Unit tests
+        run: python -m pytest tests -q -rxX
+
+      - name: Benchmark (regression gate)
+        run: python bench/benchmark.py
+
+      - name: Diagnostics
+        run: |
+          python bench/diag_fields.py
+          python bench/diag_templates.py
+          python bench/diag_bidir.py
+          python bench/diag_statemachine.py
+
+      - name: MCP end-to-end (stdio)
+        run: python tests/smoke_mcp_stdio.py
