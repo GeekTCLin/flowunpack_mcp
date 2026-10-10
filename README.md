@@ -94,7 +94,8 @@ Wireshark MCP --(单条流 hex/base64)--> flowunpack MCP --(帧结构 + 分帧�
 ## 3. 安装
 
 ```bash
-git clone <仓库地址> && cd flowunpack   # 或发布后: pip install flowunpack
+git clone https://github.com/GeekTCLin/flowunpack_mcp
+cd flowunpack_mcp                        # 或发布后: pip install flowunpack
 pip install -e .            # 核心库（零依赖）
 pip install -e ".[mcp]"     # + MCP 服务
 pip install -e ".[pcap]"    # + 读本地 pcap（scapy）

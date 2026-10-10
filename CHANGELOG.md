@@ -2,7 +2,6 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
-（开源发布时把版本条目链接到实际远程仓库的 Release 页。）
 
 ## [1.0.0] - 2026-09
 
@@ -49,3 +48,5 @@
 ### 兼容性
 
 - MCP 服务器适配 mcp 1.x / 2.x 两代 API（按构造函数签名自适应传参）。
+
+[1.0.0]: https://github.com/GeekTCLin/flowunpack_mcp/releases/tag/v1.0.0

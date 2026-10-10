@@ -31,12 +31,11 @@ classifiers = [
 ]
 dependencies = []
 
-# 开源发布前把占位 URL 换成实际远程仓库地址
 [project.urls]
-Homepage = "https://github.com/TODO-REPLACE-ME/flowunpack"
-Repository = "https://github.com/TODO-REPLACE-ME/flowunpack"
-Issues = "https://github.com/TODO-REPLACE-ME/flowunpack/issues"
-Changelog = "https://github.com/TODO-REPLACE-ME/flowunpack/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/GeekTCLin/flowunpack_mcp"
+Repository = "https://github.com/GeekTCLin/flowunpack_mcp"
+Issues = "https://github.com/GeekTCLin/flowunpack_mcp/issues"
+Changelog = "https://github.com/GeekTCLin/flowunpack_mcp/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.0"]
